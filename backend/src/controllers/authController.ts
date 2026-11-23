@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { CookieOptions, Request, Response } from 'express';
 import { pool } from '../config/db.js';
 import {
   hashPassword,
@@ -8,6 +8,30 @@ import {
 } from '../utils/crypto.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
+const cookieSameSite: 'none' | 'lax' = isProduction ? 'none' : 'lax';
+
+const authCookieOptions: CookieOptions = {
+  httpOnly: true, // Secure against XSS token extraction
+  secure: isProduction,
+  sameSite: cookieSameSite,
+  path: '/',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+};
+
+const csrfCookieOptions: CookieOptions = {
+  httpOnly: false, // Accessible to frontend JavaScript to send in X-CSRF-Token header
+  secure: isProduction,
+  sameSite: cookieSameSite,
+  path: '/',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+};
+
+const clearAuthCookieOptions: CookieOptions = {
+  httpOnly: true,
+  secure: isProduction,
+  sameSite: cookieSameSite,
+  path: '/',
+};
 
 /**
  * GET /api/auth/csrf
@@ -16,13 +40,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 export async function getCsrfToken(req: Request, res: Response): Promise<void> {
   const token = generateCsrfToken();
 
-  res.cookie('jklu_csrf_token', token, {
-    httpOnly: false, // Accessible to frontend JavaScript to send in X-CSRF-Token header
-    secure: isProduction,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  });
+  res.cookie('jklu_csrf_token', token, csrfCookieOptions);
 
   res.json({ csrfToken: token });
 }
@@ -110,13 +128,7 @@ export async function register(req: Request, res: Response): Promise<void> {
       tokenVersion: 1,
     });
 
-    res.cookie('jklu_shuttle_token', token, {
-      httpOnly: true, // Secure against XSS token extraction
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie('jklu_shuttle_token', token, authCookieOptions);
 
     res.status(201).json({
       message: 'Account successfully registered. Affiliation verification is PENDING manager review.',
@@ -189,13 +201,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       tokenVersion: user.token_version,
     });
 
-    res.cookie('jklu_shuttle_token', token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie('jklu_shuttle_token', token, authCookieOptions);
 
     res.json({
       message: 'Signed in successfully.',
@@ -225,12 +231,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
       await pool.query('UPDATE users SET token_version = token_version + 1 WHERE user_id = ?', [req.user.userId]);
     }
 
-    res.clearCookie('jklu_shuttle_token', {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-    });
+    res.clearCookie('jklu_shuttle_token', clearAuthCookieOptions);
 
     res.json({ message: 'Successfully signed out from all sessions.' });
   } catch (error: any) {

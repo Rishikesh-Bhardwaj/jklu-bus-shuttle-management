@@ -5,8 +5,8 @@ import path from 'path';
 // Ensure environment variables are loaded
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-const dbUser = process.env.DB_USER;
-const dbPassword = process.env.DB_PASSWORD;
+const dbUser = process.env.DB_USER || process.env.MYSQLUSER;
+const dbPassword = process.env.DB_PASSWORD || process.env.MYSQLPASSWORD;
 const migrationUser = process.env.DB_MIGRATION_USER;
 
 // 1. Mandatory Runtime Credentials: Require DB_USER and DB_PASSWORD across all environments
@@ -38,11 +38,11 @@ if (migrationUser && dbUser.toLowerCase() === migrationUser.toLowerCase()) {
 }
 
 const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '3306', 10),
+  host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || process.env.MYSQLPORT || '3306', 10),
   user: dbUser,
   password: dbPassword,
-  database: process.env.DB_NAME || 'jklu_bus_shuttle',
+  database: process.env.DB_NAME || process.env.MYSQLDATABASE || 'jklu_bus_shuttle',
   waitForConnections: true,
   connectionLimit: 15,
   queueLimit: 0,

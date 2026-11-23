@@ -19,13 +19,21 @@ dotenv.config({ path: path.resolve(process.cwd(), 'backend/.env') });
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust reverse proxy (Railway) for secure HTTPS cookies and client IP resolution
+app.set('trust proxy', 1);
+
 // CORS configuration supporting credentials (cookies)
-const allowedOrigins = [
+const configuredOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map((url) => url.trim().replace(/\/$/, ''))
+  : [];
+
+const allowedOrigins: string[] = [
+  ...configuredOrigins,
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-];
+].filter(Boolean);
 
 app.use(
   cors({
@@ -34,7 +42,7 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(null, true); // Permissive in local dev, restricted in prod
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
       }
     },
     credentials: true,
@@ -81,8 +89,8 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`[SERVER] JKLU Bus Shuttle Backend running on port ${PORT}`);
+  app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`[SERVER] JKLU Bus Shuttle Backend running on 0.0.0.0:${PORT}`);
     console.log(`[HEALTH] Health check available at http://localhost:${PORT}/api/health`);
   });
 }
