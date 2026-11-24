@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { extractBaseUsername, getSslConfig } from '../src/config/dbSecurity.js';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
@@ -22,20 +23,21 @@ async function resetManagerPassword(): Promise<void> {
     process.exit(1);
   }
 
-  // 2. Strict Database Identity Enforcement: Only jklu_app_user is permitted
-  const host = process.env.DB_HOST || 'localhost';
-  const port = parseInt(process.env.DB_PORT || '3306', 10);
-  const user = process.env.DB_USER;
-  const dbPassword = process.env.DB_PASSWORD;
-  const database = process.env.DB_NAME || 'jklu_bus_shuttle';
+  // 2. Strict Database Identity Enforcement: Only jklu_app_user (bare or prefixed) is permitted
+  const host = process.env.DB_HOST || process.env.MYSQLHOST || 'localhost';
+  const port = parseInt(process.env.DB_PORT || process.env.MYSQLPORT || '3306', 10);
+  const user = process.env.DB_USER || process.env.MYSQLUSER;
+  const dbPassword = process.env.DB_PASSWORD || process.env.MYSQLPASSWORD;
+  const database = process.env.DB_NAME || process.env.MYSQLDATABASE || 'jklu_bus_shuttle';
 
   if (!user || !dbPassword) {
     console.error('[SECURITY ERROR] DB_USER and DB_PASSWORD must be defined.');
     process.exit(1);
   }
 
-  if (user !== 'jklu_app_user') {
-    console.error(`[SECURITY ERROR] Unauthorized database user '${user}'. Exactly 'jklu_app_user' is required across all environments.`);
+  const baseUser = extractBaseUsername(user);
+  if (baseUser !== 'jklu_app_user') {
+    console.error(`[SECURITY ERROR] Unauthorized database user '${user}'. 'jklu_app_user' (or '<prefix>.jklu_app_user') is required across all environments.`);
     process.exit(1);
   }
 
@@ -59,12 +61,14 @@ async function resetManagerPassword(): Promise<void> {
   // 5. Connect to database
   let connection: mysql.Connection;
   try {
+    const ssl = getSslConfig(host);
     connection = await mysql.createConnection({
       host,
       port,
       user,
       password: dbPassword,
       database,
+      ssl,
       timezone: '+05:30',
     });
   } catch (connErr: any) {

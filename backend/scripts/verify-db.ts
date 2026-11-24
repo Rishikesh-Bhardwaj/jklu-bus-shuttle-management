@@ -1,15 +1,16 @@
 import mysql from 'mysql2/promise';
 import path from 'path';
 import dotenv from 'dotenv';
+import { extractBaseUsername, getSslConfig, isTiDBServer } from '../src/config/dbSecurity.js';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 async function verifyDatabase() {
-  const host = process.env.DB_HOST || 'localhost';
-  const port = parseInt(process.env.DB_PORT || '3306', 10);
+  const host = process.env.DB_HOST || process.env.MYSQLHOST || 'localhost';
+  const port = parseInt(process.env.DB_PORT || process.env.MYSQLPORT || '3306', 10);
   const user = process.env.DB_MIGRATION_USER;
   const password = process.env.DB_MIGRATION_PASSWORD;
-  const database = process.env.DB_NAME || 'jklu_bus_shuttle';
+  const database = process.env.DB_NAME || process.env.MYSQLDATABASE || 'jklu_bus_shuttle';
 
   if (!user || !password) {
     console.error(
@@ -18,15 +19,18 @@ async function verifyDatabase() {
     process.exit(1);
   }
 
-  // Strict Migration Identity Enforcement: Only jklu_migration_admin is permitted
-  if (user !== 'jklu_migration_admin') {
+  // Strict Migration Identity Enforcement: Only migration_admin (bare or prefixed) is permitted
+  const baseUser = extractBaseUsername(user);
+  if (baseUser !== 'migration_admin') {
     console.error(
-      `CRITICAL SECURITY CONFIGURATION ERROR: Unauthorized verification username '${user}'. Only 'jklu_migration_admin' is permitted to run database verification across all environments.`
+      `CRITICAL SECURITY CONFIGURATION ERROR: Unauthorized verification username '${user}'. Only 'migration_admin' (or '<prefix>.migration_admin') is permitted to run database verification across all environments.`
     );
     process.exit(1);
   }
 
-  if (process.env.DB_USER && user.toLowerCase() === process.env.DB_USER.toLowerCase()) {
+  const appUser = process.env.DB_USER || process.env.MYSQLUSER;
+  const appPassword = process.env.DB_PASSWORD || process.env.MYSQLPASSWORD;
+  if (appUser && baseUser === extractBaseUsername(appUser)) {
     console.error(
       'CRITICAL CONFIGURATION ERROR: Database verification requires administrative credentials (DB_MIGRATION_USER) and cannot use application runtime credentials.'
     );
@@ -37,12 +41,14 @@ async function verifyDatabase() {
   console.log('JKLU Bus Shuttle Management System - Database Verification');
   console.log('====================================================');
 
+  const ssl = getSslConfig(host);
   const connection = await mysql.createConnection({
     host,
     port,
     user,
     password,
     database,
+    ssl,
     timezone: '+05:30',
   });
 
@@ -76,10 +82,62 @@ async function verifyDatabase() {
     }
     console.log('----------------------------------------------------');
 
-    // 2. Operational Tables & Zero-Row Check
-    const operationalTables = [
-      'users',
-      'user_verification_audit',
+    // 2. Table Inventory & Policy Enforcement
+    console.log('User Registry & Audit Ledger Inventory:');
+
+    // 2a. Users Table: Must exist; legitimate accounts permitted
+    try {
+      const [uCnt]: any = await connection.query('SELECT COUNT(*) AS total FROM `users`');
+      const userCount = uCnt[0].total;
+      console.log(`  - Table: ${'users'.padEnd(25)} | Rows: ${userCount} (User registry - legitimate accounts permitted)`);
+
+      if (userCount > 0) {
+        const [userRows]: any = await connection.query(
+          'SELECT user_id, email, role, verification_status, account_status FROM `users`'
+        );
+        for (const u of userRows) {
+          if (!['STUDENT', 'FACULTY', 'MANAGER'].includes(u.role)) {
+            errors.push(`User record ID ${u.user_id} has invalid role: '${u.role}'`);
+          }
+          if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(u.verification_status)) {
+            errors.push(`User record ID ${u.user_id} has invalid verification_status: '${u.verification_status}'`);
+          }
+          if (!['ACTIVE', 'SUSPENDED'].includes(u.account_status)) {
+            errors.push(`User record ID ${u.user_id} has invalid account_status: '${u.account_status}'`);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.log(`  - Table: ${'users'.padEnd(25)} | MISSING`);
+      errors.push(`Table 'users' is missing: ${err.message}`);
+    }
+
+    // 2b. User Verification Audit Table: Must exist; legitimate audit trail records permitted
+    try {
+      const [aCnt]: any = await connection.query('SELECT COUNT(*) AS total FROM `user_verification_audit`');
+      const auditCount = aCnt[0].total;
+      console.log(`  - Table: ${'user_verification_audit'.padEnd(25)} | Rows: ${auditCount} (Verification audit ledger)`);
+
+      if (auditCount > 0) {
+        const [auditRows]: any = await connection.query(
+          'SELECT audit_id, user_id, previous_status, new_status FROM `user_verification_audit`'
+        );
+        for (const a of auditRows) {
+          if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(a.previous_status)) {
+            errors.push(`Audit record ID ${a.audit_id} has invalid previous_status: '${a.previous_status}'`);
+          }
+          if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(a.new_status)) {
+            errors.push(`Audit record ID ${a.audit_id} has invalid new_status: '${a.new_status}'`);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.log(`  - Table: ${'user_verification_audit'.padEnd(25)} | MISSING`);
+      errors.push(`Table 'user_verification_audit' is missing: ${err.message}`);
+    }
+
+    // 2c. Operational Transport Tables: Strict Zero-Fake-Data policy (must contain 0 rows)
+    const operationalTransportTables = [
       'buses',
       'seats',
       'drivers',
@@ -94,18 +152,18 @@ async function verifyDatabase() {
       'feedback',
     ];
 
-    console.log('Operational Table Inventory & Zero-Row Count Verification:');
-    for (const tbl of operationalTables) {
+    console.log('Operational Transport Tables (Zero-Fake-Data Policy - Expected 0 Rows):');
+    for (const tbl of operationalTransportTables) {
       try {
         const [cntRows]: any = await connection.query(`SELECT COUNT(*) AS total FROM \`${tbl}\``);
         const count = cntRows[0].total;
         console.log(`  - Table: ${tbl.padEnd(25)} | Rows: ${count}`);
         if (count !== 0) {
-          errors.push(`Table '${tbl}' violates Zero-Fake-Data policy: contains ${count} rows (expected 0)`);
+          errors.push(`Operational transport table '${tbl}' violates Zero-Fake-Data policy: contains ${count} rows (expected 0)`);
         }
       } catch (err: any) {
         console.log(`  - Table: ${tbl.padEnd(25)} | MISSING`);
-        errors.push(`Table '${tbl}' is missing: ${err.message}`);
+        errors.push(`Operational transport table '${tbl}' is missing: ${err.message}`);
       }
     }
 
@@ -125,7 +183,7 @@ async function verifyDatabase() {
     console.log('Verifying `users` verification columns, index, and foreign key...');
     const [userCols]: any = await connection.query(
       `SELECT COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, COLLATION_NAME, IS_NULLABLE, COLUMN_DEFAULT
-       FROM information_schema.COLUMNS 
+       FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'
          AND COLUMN_NAME IN ('verification_status', 'token_version', 'verification_reviewed_by_user_id', 'verification_reviewed_at', 'verification_notes')`,
       [database]
@@ -199,11 +257,11 @@ async function verifyDatabase() {
     // Index: idx_user_verification
     const [uIdx]: any = await connection.query(
       `SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX, NON_UNIQUE
-       FROM information_schema.STATISTICS 
+       FROM information_schema.STATISTICS
        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_user_verification'`,
       [database]
     );
-    if (uIdx.length !== 1 || uIdx[0].COLUMN_NAME !== 'verification_status' || uIdx[0].SEQ_IN_INDEX !== 1 || uIdx[0].NON_UNIQUE !== 1) {
+    if (uIdx.length !== 1 || uIdx[0].COLUMN_NAME !== 'verification_status' || Number(uIdx[0].SEQ_IN_INDEX) !== 1 || Number(uIdx[0].NON_UNIQUE) !== 1) {
       errors.push("Missing or invalid index 'idx_user_verification' on users.verification_status");
     }
 
@@ -211,7 +269,7 @@ async function verifyDatabase() {
     const [uFk]: any = await connection.query(
       `SELECT rc.CONSTRAINT_NAME, kcu.COLUMN_NAME, rc.DELETE_RULE, kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME
        FROM information_schema.REFERENTIAL_CONSTRAINTS rc
-       JOIN information_schema.KEY_COLUMN_USAGE kcu 
+       JOIN information_schema.KEY_COLUMN_USAGE kcu
          ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
        WHERE rc.CONSTRAINT_SCHEMA = ? AND rc.TABLE_NAME = 'users' AND rc.CONSTRAINT_NAME = 'fk_user_reviewed_by'`,
       [database]
@@ -230,8 +288,8 @@ async function verifyDatabase() {
     // 4. Deep Verification: user_verification_audit table
     console.log('Verifying `user_verification_audit` table structure, exact constraints, and exact indexes...');
     const [auditTbl]: any = await connection.query(
-      `SELECT TABLE_NAME, ENGINE, TABLE_COLLATION 
-       FROM information_schema.TABLES 
+      `SELECT TABLE_NAME, ENGINE, TABLE_COLLATION
+       FROM information_schema.TABLES
        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'user_verification_audit'`,
       [database]
     );
@@ -397,45 +455,149 @@ async function verifyDatabase() {
         { name: 'idx_audit_reviewed_at', col: 'reviewed_at' },
       ]) {
         const found = aIdxMap.get(`${exp.name}:${exp.col}`);
-        if (!found || found.SEQ_IN_INDEX !== 1 || found.NON_UNIQUE !== 1) {
+        if (!found || Number(found.SEQ_IN_INDEX) !== 1 || Number(found.NON_UNIQUE) !== 1) {
           errors.push(`Missing or invalid index '${exp.name}' on user_verification_audit(${exp.col})`);
         }
       }
     }
     console.log('----------------------------------------------------');
 
-    // 5. Deep Verification: Triggers
-    console.log('Verifying immutability triggers on `user_verification_audit`...');
-    const [trgRows]: any = await connection.query(
-      `SELECT TRIGGER_NAME, EVENT_MANIPULATION, EVENT_OBJECT_TABLE, ACTION_TIMING, ACTION_STATEMENT
-       FROM information_schema.TRIGGERS 
-       WHERE TRIGGER_SCHEMA = ? AND TRIGGER_NAME IN ('trg_user_verification_audit_no_update', 'trg_user_verification_audit_no_delete')`,
-      [database]
-    );
-    const trgMap = new Map<string, any>(trgRows.map((t: any) => [t.TRIGGER_NAME, t]));
+    // 5. Deep Verification: Audit-Log Immutability (MySQL Triggers vs TiDB User Grants)
+    const isTiDB = isTiDBServer(vRows[0]?.ver);
 
-    const trgUpdate = trgMap.get('trg_user_verification_audit_no_update');
-    if (
-      !trgUpdate ||
-      trgUpdate.EVENT_OBJECT_TABLE !== 'user_verification_audit' ||
-      trgUpdate.EVENT_MANIPULATION !== 'UPDATE' ||
-      trgUpdate.ACTION_TIMING !== 'BEFORE' ||
-      !trgUpdate.ACTION_STATEMENT.includes('45000') ||
-      !trgUpdate.ACTION_STATEMENT.includes('immutable')
-    ) {
-      errors.push(`Missing or invalid trigger 'trg_user_verification_audit_no_update': ${JSON.stringify(trgUpdate)}`);
-    }
+    if (isTiDB) {
+      console.log('Verifying TiDB audit-log immutability and least-privilege effective grants...');
 
-    const trgDelete = trgMap.get('trg_user_verification_audit_no_delete');
-    if (
-      !trgDelete ||
-      trgDelete.EVENT_OBJECT_TABLE !== 'user_verification_audit' ||
-      trgDelete.EVENT_MANIPULATION !== 'DELETE' ||
-      trgDelete.ACTION_TIMING !== 'BEFORE' ||
-      !trgDelete.ACTION_STATEMENT.includes('45000') ||
-      !trgDelete.ACTION_STATEMENT.includes('immutable')
-    ) {
-      errors.push(`Missing or invalid trigger 'trg_user_verification_audit_no_delete': ${JSON.stringify(trgDelete)}`);
+      // 5a. Verify triggers are omitted in TiDB
+      const [trgRows]: any = await connection.query(
+        `SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ?`,
+        [database]
+      );
+      if (trgRows.length > 0) {
+        errors.push(`Unexpected triggers found in TiDB schema: ${trgRows.map((t: any) => t.TRIGGER_NAME).join(', ')}`);
+      } else {
+        console.log('  - Confirmed 0 triggers present in TiDB schema.');
+      }
+
+      // 5b. Verify application runtime account least-privilege grants via SHOW GRANTS
+      if (!appUser) {
+        errors.push("Cannot verify application least-privilege immutability: DB_USER environment variable is not defined.");
+      } else {
+        console.log(`  - Inspecting effective database grants for application user '${appUser}'...`);
+        try {
+          let grantRows: any;
+          if (appPassword) {
+            console.log(`  - Connecting as '${appUser}' to self-inspect active grants (zero mysql.* privileges required)...`);
+            const appConnection = await mysql.createConnection({
+              host,
+              port,
+              user: appUser,
+              password: appPassword,
+              database,
+              ssl,
+              timezone: '+05:30',
+            });
+            try {
+              [grantRows] = await appConnection.query('SHOW GRANTS');
+            } finally {
+              await appConnection.end();
+            }
+          } else {
+            console.log(`  - DB_PASSWORD not provided; attempting cross-account SHOW GRANTS for '${appUser}'...`);
+            [grantRows] = await connection.query(`SHOW GRANTS FOR ?@'%'`, [appUser]);
+          }
+          const grantStatements: string[] = grantRows.map((r: any) => Object.values(r)[0] as string);
+
+          let hasSelectOnAudit = false;
+          let hasInsertOnAudit = false;
+          let hasForbiddenUpdateDelete = false;
+          const violations: string[] = [];
+
+          for (const g of grantStatements) {
+            const upper = g.toUpperCase();
+            const isGlobal = upper.includes('ON *.*');
+            const isDatabaseWide = upper.includes(`ON \`${database.toUpperCase()}\`.*`) || upper.includes(`ON ${database.toUpperCase()}.*`);
+            const isAuditTable = upper.includes('USER_VERIFICATION_AUDIT');
+
+            // Global or database-wide ALL PRIVILEGES allows modifying the audit table
+            if ((isGlobal || isDatabaseWide) && upper.includes('ALL PRIVILEGES')) {
+              hasForbiddenUpdateDelete = true;
+              violations.push(`Forbidden ALL PRIVILEGES: ${g}`);
+            }
+
+            // Global or database-wide UPDATE / DELETE cascades to user_verification_audit
+            if ((isGlobal || isDatabaseWide) && (upper.includes('UPDATE') || upper.includes('DELETE'))) {
+              hasForbiddenUpdateDelete = true;
+              violations.push(`Forbidden database-wide UPDATE/DELETE: ${g}`);
+            }
+
+            // Specific table-level UPDATE or DELETE on user_verification_audit is strictly prohibited
+            if (isAuditTable && (upper.includes('UPDATE') || upper.includes('DELETE'))) {
+              hasForbiddenUpdateDelete = true;
+              violations.push(`Forbidden audit table UPDATE/DELETE: ${g}`);
+            }
+
+            // Check for required SELECT & INSERT on audit table
+            if (isAuditTable || isDatabaseWide || isGlobal) {
+              if (upper.includes('SELECT')) hasSelectOnAudit = true;
+              if (upper.includes('INSERT')) hasInsertOnAudit = true;
+            }
+          }
+
+          if (hasForbiddenUpdateDelete) {
+            for (const v of violations) {
+              errors.push(`Audit immutability violation on '${appUser}': ${v}`);
+            }
+          } else {
+            console.log("  ✓ PASS: Application user strictly lacks UPDATE/DELETE privileges on 'user_verification_audit'.");
+          }
+
+          if (!hasSelectOnAudit || !hasInsertOnAudit) {
+            errors.push(`Application user '${appUser}' lacks required SELECT or INSERT privileges on 'user_verification_audit'.`);
+          } else {
+            console.log("  ✓ PASS: Application user possesses required SELECT and INSERT privileges on 'user_verification_audit'.");
+          }
+        } catch (grantErr: any) {
+          const hint = !appPassword
+            ? " (Hint: Provide DB_PASSWORD to allow the runtime user to self-inspect grants without requiring administrative SELECT on mysql.*)"
+            : '';
+          errors.push(`Failed to inspect SHOW GRANTS for application user '${appUser}': ${grantErr.message}${hint}`);
+        }
+      }
+    } else {
+      // 5. Deep Verification: MySQL Triggers
+      console.log('Verifying immutability triggers on `user_verification_audit` (MySQL Engine)...');
+      const [trgRows]: any = await connection.query(
+        `SELECT TRIGGER_NAME, EVENT_MANIPULATION, EVENT_OBJECT_TABLE, ACTION_TIMING, ACTION_STATEMENT
+         FROM information_schema.TRIGGERS
+         WHERE TRIGGER_SCHEMA = ? AND TRIGGER_NAME IN ('trg_user_verification_audit_no_update', 'trg_user_verification_audit_no_delete')`,
+        [database]
+      );
+      const trgMap = new Map<string, any>(trgRows.map((t: any) => [t.TRIGGER_NAME, t]));
+
+      const trgUpdate = trgMap.get('trg_user_verification_audit_no_update');
+      if (
+        !trgUpdate ||
+        trgUpdate.EVENT_OBJECT_TABLE !== 'user_verification_audit' ||
+        trgUpdate.EVENT_MANIPULATION !== 'UPDATE' ||
+        trgUpdate.ACTION_TIMING !== 'BEFORE' ||
+        !trgUpdate.ACTION_STATEMENT.includes('45000') ||
+        !trgUpdate.ACTION_STATEMENT.includes('immutable')
+      ) {
+        errors.push(`Missing or invalid trigger 'trg_user_verification_audit_no_update': ${JSON.stringify(trgUpdate)}`);
+      }
+
+      const trgDelete = trgMap.get('trg_user_verification_audit_no_delete');
+      if (
+        !trgDelete ||
+        trgDelete.EVENT_OBJECT_TABLE !== 'user_verification_audit' ||
+        trgDelete.EVENT_MANIPULATION !== 'DELETE' ||
+        trgDelete.ACTION_TIMING !== 'BEFORE' ||
+        !trgDelete.ACTION_STATEMENT.includes('45000') ||
+        !trgDelete.ACTION_STATEMENT.includes('immutable')
+      ) {
+        errors.push(`Missing or invalid trigger 'trg_user_verification_audit_no_delete': ${JSON.stringify(trgDelete)}`);
+      }
     }
 
     console.log('====================================================');

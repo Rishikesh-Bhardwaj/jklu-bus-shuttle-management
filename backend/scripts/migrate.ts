@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { extractBaseUsername, getSslConfig, isTiDBServer } from '../src/config/dbSecurity.js';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
@@ -9,14 +10,15 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
  * Step 1: Apply or verify alteration of the `users` table.
  *
  * Authoritative Executable Definition:
- * - If columns are absent, applies the ALTER TABLE statement.
+ * - Checks each column, index, and foreign key individually for safe, idempotent re-runs.
+ * - Adds missing objects sequentially, compatible with both standard MySQL and TiDB online DDL.
  * - Both fresh creation and resume paths execute the unified verification against information_schema:
  *   - Exactly 5 columns with exact signedness, types, collation (utf8mb4_unicode_ci), and nullability
  *   - Index idx_user_verification (column, sequence 1, non-unique)
  *   - Foreign key fk_user_reviewed_by (constraint name, column, ref table, ref col, DELETE_RULE)
  */
 async function applyOrVerifyUsersAlteration(connection: mysql.Connection, database: string): Promise<void> {
-  // Query 1: Check presence of target columns
+  // Query 1: Check presence of target columns individually to ensure idempotent application
   const [initialCols]: any = await connection.query(
     `SELECT COLUMN_NAME
      FROM information_schema.COLUMNS
@@ -25,23 +27,78 @@ async function applyOrVerifyUsersAlteration(connection: mysql.Connection, databa
     [database]
   );
 
-  if (initialCols.length === 0) {
-    console.log('    [Step 1/4] Applying ALTER TABLE on `users`...');
+  const existingColSet = new Set(initialCols.map((c: any) => c.COLUMN_NAME));
+
+  if (!existingColSet.has('verification_status')) {
+    console.log('    [Step 1/4] Adding column `verification_status` to `users`...');
     await connection.query(`
       ALTER TABLE users
-      ADD COLUMN verification_status ENUM('PENDING', 'VERIFIED', 'REJECTED') NOT NULL DEFAULT 'PENDING' AFTER account_status,
-      ADD COLUMN token_version INT NOT NULL DEFAULT 1 AFTER verification_status,
-      ADD COLUMN verification_reviewed_by_user_id INT NULL AFTER token_version,
-      ADD COLUMN verification_reviewed_at TIMESTAMP NULL AFTER verification_reviewed_by_user_id,
-      ADD COLUMN verification_notes VARCHAR(255) NULL AFTER verification_reviewed_at,
-      ADD INDEX idx_user_verification (verification_status),
+      ADD COLUMN verification_status ENUM('PENDING', 'VERIFIED', 'REJECTED') NOT NULL DEFAULT 'PENDING' AFTER account_status
+    `);
+  }
+
+  if (!existingColSet.has('token_version')) {
+    console.log('    [Step 1/4] Adding column `token_version` to `users`...');
+    await connection.query(`
+      ALTER TABLE users
+      ADD COLUMN token_version INT NOT NULL DEFAULT 1 AFTER verification_status
+    `);
+  }
+
+  if (!existingColSet.has('verification_reviewed_by_user_id')) {
+    console.log('    [Step 1/4] Adding column `verification_reviewed_by_user_id` to `users`...');
+    await connection.query(`
+      ALTER TABLE users
+      ADD COLUMN verification_reviewed_by_user_id INT NULL AFTER token_version
+    `);
+  }
+
+  if (!existingColSet.has('verification_reviewed_at')) {
+    console.log('    [Step 1/4] Adding column `verification_reviewed_at` to `users`...');
+    await connection.query(`
+      ALTER TABLE users
+      ADD COLUMN verification_reviewed_at TIMESTAMP NULL AFTER verification_reviewed_by_user_id
+    `);
+  }
+
+  if (!existingColSet.has('verification_notes')) {
+    console.log('    [Step 1/4] Adding column `verification_notes` to `users`...');
+    await connection.query(`
+      ALTER TABLE users
+      ADD COLUMN verification_notes VARCHAR(255) NULL AFTER verification_reviewed_at
+    `);
+  }
+
+  // Check and apply index idx_user_verification
+  const [initialIdx]: any = await connection.query(
+    `SELECT INDEX_NAME
+     FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_user_verification'`,
+    [database]
+  );
+  if (initialIdx.length === 0) {
+    console.log('    [Step 1/4] Adding index `idx_user_verification` to `users`...');
+    await connection.query(`
+      ALTER TABLE users ADD INDEX idx_user_verification (verification_status)
+    `);
+  }
+
+  // Check and apply foreign key fk_user_reviewed_by
+  const [initialFk]: any = await connection.query(
+    `SELECT rc.CONSTRAINT_NAME
+     FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+     WHERE rc.CONSTRAINT_SCHEMA = ? AND rc.TABLE_NAME = 'users' AND rc.CONSTRAINT_NAME = 'fk_user_reviewed_by'`,
+    [database]
+  );
+  if (initialFk.length === 0) {
+    console.log('    [Step 1/4] Adding foreign key `fk_user_reviewed_by` to `users`...');
+    await connection.query(`
+      ALTER TABLE users
       ADD CONSTRAINT fk_user_reviewed_by FOREIGN KEY (verification_reviewed_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
     `);
-    console.log('    [Step 1/4] ALTER TABLE executed; verifying created objects immediately...');
-  } else if (initialCols.length !== 5) {
-    const foundNames = initialCols.map((c: any) => c.COLUMN_NAME).join(', ');
-    throw new Error(`Inconsistent schema on 'users': Expected 5 verification columns, found ${initialCols.length} (${foundNames}).`);
   }
+
+  console.log('    [Step 1/4] Alterations applied; verifying created objects against schema metadata...');
 
   // Unified Verification: Query exact column definitions from information_schema
   const [cols]: any = await connection.query(
@@ -130,8 +187,8 @@ async function applyOrVerifyUsersAlteration(connection: mysql.Connection, databa
   if (
     indexRows.length !== 1 ||
     indexRows[0].COLUMN_NAME !== 'verification_status' ||
-    indexRows[0].SEQ_IN_INDEX !== 1 ||
-    indexRows[0].NON_UNIQUE !== 1
+    Number(indexRows[0].SEQ_IN_INDEX) !== 1 ||
+    Number(indexRows[0].NON_UNIQUE) !== 1
   ) {
     throw new Error("Missing or invalid index 'idx_user_verification' on users.verification_status");
   }
@@ -387,7 +444,7 @@ async function applyOrVerifyAuditTable(connection: mysql.Connection, database: s
 
   for (const exp of expectedIndexes) {
     const found = idxLookup.get(`${exp.name}:${exp.col}`);
-    if (!found || found.SEQ_IN_INDEX !== 1 || found.NON_UNIQUE !== 1) {
+    if (!found || Number(found.SEQ_IN_INDEX) !== 1 || Number(found.NON_UNIQUE) !== 1) {
       throw new Error(`Missing or invalid index '${exp.name}' on user_verification_audit(${exp.col})`);
     }
   }
@@ -509,12 +566,21 @@ async function applyOrVerifyDeleteTrigger(connection: mysql.Connection, database
  * Executes all 4 steps sequentially and validates every object immediately against information_schema.
  */
 async function applyMigration010(connection: mysql.Connection, database: string): Promise<void> {
-  console.log('  [MIGRATION 010] Executing step-by-step resilient migration with immediate verification...');
+  const [vRows]: any = await connection.query('SELECT VERSION() AS ver');
+  const isTiDB = isTiDBServer(vRows[0]?.ver);
+
+  console.log(`  [MIGRATION 010] Executing step-by-step resilient migration (Target Engine: ${isTiDB ? 'TiDB' : 'MySQL'})...`);
   await applyOrVerifyUsersAlteration(connection, database);
   await applyOrVerifyAuditTable(connection, database);
-  await applyOrVerifyUpdateTrigger(connection, database);
-  await applyOrVerifyDeleteTrigger(connection, database);
-  console.log('  [MIGRATION 010] All 4 steps successfully applied and verified.');
+
+  if (isTiDB) {
+    console.log('  [Step 3 & 4: SKIPPED FOR TiDB] Stored triggers are not supported in TiDB.');
+    console.log('  [TiDB IMMUTABILITY] Audit-log immutability is enforced via database user privileges (SELECT & INSERT ONLY on `user_verification_audit`).');
+  } else {
+    await applyOrVerifyUpdateTrigger(connection, database);
+    await applyOrVerifyDeleteTrigger(connection, database);
+  }
+  console.log('  [MIGRATION 010] Migration 010 steps successfully applied and verified.');
 }
 
 /**
@@ -526,11 +592,11 @@ async function applyMigration010(connection: mysql.Connection, database: string)
  * - Records migration strictly after all steps succeed
  */
 async function runMigrations(): Promise<void> {
-  const host = process.env.DB_HOST || 'localhost';
-  const port = parseInt(process.env.DB_PORT || '3306', 10);
+  const host = process.env.DB_HOST || process.env.MYSQLHOST || 'localhost';
+  const port = parseInt(process.env.DB_PORT || process.env.MYSQLPORT || '3306', 10);
   const user = process.env.DB_MIGRATION_USER;
   const password = process.env.DB_MIGRATION_PASSWORD;
-  const database = process.env.DB_NAME || 'jklu_bus_shuttle';
+  const database = process.env.DB_NAME || process.env.MYSQLDATABASE || 'jklu_bus_shuttle';
 
   // 1. Mandatory Migration Credentials
   if (!user || !password) {
@@ -540,16 +606,18 @@ async function runMigrations(): Promise<void> {
     process.exit(1);
   }
 
-  // 2. Strict Migration Identity Enforcement: Only jklu_migration_admin is permitted
-  if (user !== 'jklu_migration_admin') {
+  // 2. Strict Migration Identity Enforcement: Only migration_admin (bare or prefixed) is permitted
+  const baseUser = extractBaseUsername(user);
+  if (baseUser !== 'migration_admin') {
     console.error(
-      `CRITICAL SECURITY CONFIGURATION ERROR: Unauthorized migration username '${user}'. Only 'jklu_migration_admin' is permitted to execute migrations across all environments.`
+      `CRITICAL SECURITY CONFIGURATION ERROR: Unauthorized migration username '${user}'. Only 'migration_admin' (or '<prefix>.migration_admin') is permitted to execute migrations across all environments.`
     );
     process.exit(1);
   }
 
   // 3. Reject application runtime account for migrations
-  if (process.env.DB_USER && user.toLowerCase() === process.env.DB_USER.toLowerCase()) {
+  const appUser = process.env.DB_USER || process.env.MYSQLUSER;
+  if (appUser && baseUser === extractBaseUsername(appUser)) {
     console.error(
       'CRITICAL CONFIGURATION ERROR: Migration runner cannot connect using the application runtime account (DB_USER). Dedicated migration credentials (DB_MIGRATION_USER) are required.'
     );
@@ -563,12 +631,14 @@ async function runMigrations(): Promise<void> {
 
   let connection: mysql.Connection;
   try {
+    const ssl = getSslConfig(host);
     connection = await mysql.createConnection({
       host,
       port,
       user,
       password,
       database,
+      ssl,
       multipleStatements: true,
       timezone: '+05:30',
     });

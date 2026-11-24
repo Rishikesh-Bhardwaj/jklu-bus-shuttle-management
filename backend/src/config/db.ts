@@ -1,6 +1,7 @@
 import mysql, { Pool, PoolConnection } from 'mysql2/promise';
 import dotenv from 'dotenv';
 import path from 'path';
+import { extractBaseUsername, getSslConfig } from './dbSecurity.js';
 
 // Ensure environment variables are loaded
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -16,33 +17,39 @@ if (!dbUser || !dbPassword) {
   );
 }
 
-// 2. Reject MySQL root account across all environments
-if (dbUser.toLowerCase() === 'root') {
+const baseAppUser = extractBaseUsername(dbUser);
+
+// 2. Reject MySQL root account (bare or prefixed) across all environments
+if (baseAppUser === 'root') {
   throw new Error(
     'CRITICAL SECURITY CONFIGURATION ERROR: Application runtime connection cannot use the MySQL root account in any environment. Configure a dedicated least-privilege DB_USER.'
   );
 }
 
-// 3. Reject dedicated migration administrator identity (jklu_migration_admin) across all environments
-if (dbUser.toLowerCase() === 'jklu_migration_admin') {
+// 3. Reject dedicated migration administrator identity (bare or prefixed) across all environments
+if (baseAppUser === 'migration_admin') {
   throw new Error(
-    'CRITICAL SECURITY CONFIGURATION ERROR: Application runtime connection cannot use the dedicated migration administrator account (jklu_migration_admin). Enforce credential separation across all environments.'
+    'CRITICAL SECURITY CONFIGURATION ERROR: Application runtime connection cannot use the dedicated migration administrator account (migration_admin). Enforce credential separation across all environments.'
   );
 }
 
 // 4. Reject configured DB_MIGRATION_USER across all environments
-if (migrationUser && dbUser.toLowerCase() === migrationUser.toLowerCase()) {
+if (migrationUser && baseAppUser === extractBaseUsername(migrationUser)) {
   throw new Error(
     'CRITICAL SECURITY CONFIGURATION ERROR: Application runtime connection cannot use the configured migration administrator account (DB_MIGRATION_USER). Enforce credential separation across all environments.'
   );
 }
 
-const dbConfig = {
-  host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
+const host = process.env.DB_HOST || process.env.MYSQLHOST || 'localhost';
+const ssl = getSslConfig(host);
+
+const dbConfig: mysql.PoolOptions = {
+  host,
   port: parseInt(process.env.DB_PORT || process.env.MYSQLPORT || '3306', 10),
   user: dbUser,
   password: dbPassword,
   database: process.env.DB_NAME || process.env.MYSQLDATABASE || 'jklu_bus_shuttle',
+  ssl,
   waitForConnections: true,
   connectionLimit: 15,
   queueLimit: 0,

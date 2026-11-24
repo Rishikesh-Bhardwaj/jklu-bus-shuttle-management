@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { extractBaseUsername, getSslConfig } from '../src/config/dbSecurity.js';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
@@ -18,30 +19,37 @@ async function setupManager() {
     process.exit(1);
   }
 
-  const host = process.env.DB_HOST || 'localhost';
-  const port = parseInt(process.env.DB_PORT || '3306', 10);
-  const user = process.env.DB_USER;
-  const dbPassword = process.env.DB_PASSWORD;
-  const database = process.env.DB_NAME || 'jklu_bus_shuttle';
+  const host = process.env.DB_HOST || process.env.MYSQLHOST || 'localhost';
+  const port = parseInt(process.env.DB_PORT || process.env.MYSQLPORT || '3306', 10);
+  const user = process.env.DB_USER || process.env.MYSQLUSER;
+  const dbPassword = process.env.DB_PASSWORD || process.env.MYSQLPASSWORD;
+  const database = process.env.DB_NAME || process.env.MYSQLDATABASE || 'jklu_bus_shuttle';
 
   if (!user || !dbPassword) {
     console.error('[SECURITY ERROR] DB_USER and DB_PASSWORD must be configured in environment.');
     process.exit(1);
   }
 
-  if (user === 'root') {
+  const baseUser = extractBaseUsername(user);
+  if (baseUser === 'root') {
     console.error('[SECURITY ERROR] Using MySQL root account is strictly prohibited.');
+    process.exit(1);
+  }
+  if (baseUser === 'migration_admin') {
+    console.error('[SECURITY ERROR] Using migration admin account for manager setup is strictly prohibited.');
     process.exit(1);
   }
 
   console.log(`Connecting to database '${database}' to configure initial manager...`);
 
+  const ssl = getSslConfig(host);
   const connection = await mysql.createConnection({
     host,
     port,
     user,
     password: dbPassword,
     database,
+    ssl,
     timezone: '+05:30',
   });
 
