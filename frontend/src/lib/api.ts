@@ -3,9 +3,7 @@
  * JKLU Bus Shuttle Management System - API Client
  */
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  'https://jklu-bus-shuttle-api.onrender.com/api';
+const API_BASE_URL = '/api';
 
 let csrfToken: string | null = null;
 
