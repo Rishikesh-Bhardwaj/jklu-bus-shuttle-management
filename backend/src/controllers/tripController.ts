@@ -359,98 +359,67 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
  * MANAGER only: Cancel or delete a scheduled trip.
  */
 export async function deleteTrip(req: Request, res: Response): Promise<void> {
-  const connection = await pool.getConnection();
-  try {
-    const tripId = parseInt(req.params.id, 10);
-    if (isNaN(tripId)) {
-      res.status(400).json({ error: 'Invalid trip ID.' });
-      return;
-    }
+  const tripId = parseInt(req.params.id, 10);
+  if (isNaN(tripId)) {
+    res.status(400).json({ error: 'Invalid trip ID.' });
+    return;
+  }
 
-    const [trips]: any = await pool.query(
-      'SELECT trip_id, route_id, trip_date, departure_time, trip_status FROM trips WHERE trip_id = ?',
+  const connection = await pool.getConnection();
+  let transactionStarted = false;
+  try {
+    const [trips]: any = await connection.query(
+      'SELECT trip_id, route_id, trip_date, departure_time FROM trips WHERE trip_id = ?',
       [tripId]
     );
-
     if (trips.length === 0) {
       res.status(404).json({ error: 'Trip not found.' });
       return;
     }
 
-    // Check for any passenger bookings (confirmed, completed, or cancelled)
-    const [bookingStats]: any = await pool.query(
-      'SELECT COUNT(*) AS totalBookings FROM bookings WHERE trip_id = ?',
+    const [bookingRows]: any = await connection.query(
+      'SELECT COUNT(*) AS count FROM bookings WHERE trip_id = ?',
       [tripId]
     );
-
-    const totalBookings = bookingStats[0]?.totalBookings || 0;
-
-    if (totalBookings > 0) {
-      // Trips with passenger bookings are soft-cancelled instead of rejected.
-      // Use a database transaction to update trip status, check-ins, and release seat reservations.
-      await connection.beginTransaction();
-
-      // 1. Update trip status to CANCELLED
-      await connection.query(
-        "UPDATE trips SET trip_status = 'CANCELLED' WHERE trip_id = ?",
-        [tripId]
-      );
-
-      // 2. Update related unboarded check-in records to CANCELLED_PRIOR
-      await connection.query(
-        `UPDATE check_ins ci
-         JOIN bookings b ON ci.booking_id = b.booking_id
-         SET ci.boarding_status = 'CANCELLED_PRIOR'
-         WHERE b.trip_id = ? AND ci.boarding_status = 'NOT_CHECKED_IN'`,
-        [tripId]
-      );
-
-      // 3. Release all seat reservations for that trip
-      await connection.query(
-        'DELETE FROM trip_seat_reservations WHERE trip_id = ?',
-        [tripId]
-      );
-
-      await connection.commit();
-
-      res.json({
-        message: `Trip #${tripId} has associated passenger records. It has been safely cancelled and deactivated to preserve booking and ticket history.`,
-        action: 'CANCELLED',
-        tripId,
+    const bookingCount = Number(bookingRows[0]?.count || 0);
+    if (bookingCount > 0) {
+      res.status(409).json({
+        error: `Cannot permanently delete trip #${tripId}: it has ${bookingCount} passenger booking(s). Preserve passenger tickets and check-in history by resolving those bookings before deleting the trip. No data was changed.`,
+        dependencies: { bookings: bookingCount },
       });
       return;
     }
 
-    // Trips without bookings: attempt clean hard deletion of reservations & trip
-    try {
-      await connection.beginTransaction();
-      await connection.query('DELETE FROM trip_seat_reservations WHERE trip_id = ?', [tripId]);
-      await connection.query('DELETE FROM trips WHERE trip_id = ?', [tripId]);
-      await connection.commit();
-      res.json({
-        message: `Scheduled trip #${tripId} has been permanently deleted.`,
-        action: 'DELETED',
-        tripId,
-      });
-    } catch {
-      await connection.rollback();
-      // Fallback: soft cancellation if hard deletion is restricted by database privileges/FKs
-      await connection.beginTransaction();
-      await connection.query("UPDATE trips SET trip_status = 'CANCELLED' WHERE trip_id = ?", [tripId]);
-      await connection.query('DELETE FROM trip_seat_reservations WHERE trip_id = ?', [tripId]);
-      await connection.commit();
-      res.json({
-        message: `Trip #${tripId} has been cancelled and deactivated.`,
-        action: 'CANCELLED',
-        tripId,
-      });
+    await connection.beginTransaction();
+    transactionStarted = true;
+    await connection.query('DELETE FROM trip_seat_reservations WHERE trip_id = ?', [tripId]);
+    const [deleteResult]: any = await connection.query(
+      'DELETE FROM trips WHERE trip_id = ?',
+      [tripId]
+    );
+    if (deleteResult.affectedRows !== 1) {
+      throw new Error('Trip was not deleted; no matching record remained.');
     }
+    await connection.commit();
+    transactionStarted = false;
+
+    res.json({
+      message: `Trip #${tripId} has been permanently deleted.`,
+      action: 'DELETED',
+      tripId,
+    });
   } catch (error: any) {
-    await connection.rollback();
+    if (transactionStarted) {
+      try { await connection.rollback(); } catch { /* preserve original error */ }
+    }
+    const isForeignKey = error.code === 'ER_ROW_IS_REFERENCED_2' || error.errno === 1451;
     console.error('[TRIP_DELETE_ERROR]', error);
-    res.status(500).json({ error: 'Failed to process trip deletion.' });
+    res.status(isForeignKey ? 409 : 500).json({
+      error: isForeignKey
+        ? `Cannot permanently delete trip #${tripId}: another record still references it. No data was changed.`
+        : `Failed to permanently delete trip #${tripId}: ${error.sqlMessage || error.message || 'Database error'}`,
+    });
   } finally {
     connection.release();
   }
 }
-
