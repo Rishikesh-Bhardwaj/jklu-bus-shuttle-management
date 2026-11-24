@@ -3,7 +3,7 @@
  * Configured with automatic CSRF synchronization and HTTP-only cookie support.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://jklu-bus-shuttle-api.onrender.com/api';
 
 function getCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
