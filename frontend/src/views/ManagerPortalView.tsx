@@ -866,6 +866,22 @@ export const ManagerPortalView: React.FC = () => {
                           <RotateCcw className="w-3 h-3" />
                           <span>Reactivate</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmModal({
+                            isOpen: true,
+                            title: 'Permanently Delete Bus',
+                            message: `Are you sure you want to permanently delete bus "${bus.bus_no}" and its seat inventory?`,
+                            details: 'Deletion is allowed only when no trips or passenger bookings reference this bus. Otherwise, the request will be blocked and the records will remain unchanged.',
+                            itemType: 'bus',
+                            itemId: bus.bus_id,
+                            itemName: bus.bus_no
+                          })}
+                          className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                          title="Permanently Delete Bus"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       ) : (
                         <button
                           type="button"
@@ -877,7 +893,6 @@ export const ManagerPortalView: React.FC = () => {
                             itemType: 'bus',
                             itemId: bus.bus_id,
                             itemName: bus.bus_no,
-                            isDeactivation: true
                           })}
                           className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
                           title="Permanently Delete Bus"
@@ -1475,7 +1490,6 @@ export const ManagerPortalView: React.FC = () => {
                               itemType: 'trip',
                               itemId: t.trip_id,
                               itemName: `Trip #${t.trip_id} (${t.route_name})`,
-                              isDeactivation: true
                             })}
                             className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors inline-flex items-center"
                             title="Permanently Delete Trip"
@@ -1887,7 +1901,7 @@ export const ManagerPortalView: React.FC = () => {
                 ) : (
                   <>
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>{deleteConfirmModal.isDeactivation ? 'Confirm Deactivate / Delete' : 'Confirm Delete'}</span>
+                    <span>Confirm Permanent Delete</span>
                   </>
                 )}
               </button>
