@@ -47,12 +47,13 @@ export const SeatMapModal: React.FC<SeatMapModalProps> = ({
         setError(null);
         const data = await apiRequest(`/trips/${tripId}`);
         setTrip(data.trip);
-        setRouteStops(data.routeStops || []);
+        const stopsList = data.routeStops || data.stops || data.trip?.stops || [];
+        setRouteStops(stopsList);
         setSeats(data.seats || []);
 
         // Default to first route stop
-        if (data.routeStops && data.routeStops.length > 0) {
-          setSelectedStopId(data.routeStops[0].stop_id);
+        if (stopsList.length > 0) {
+          setSelectedStopId(stopsList[0].stop_id);
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load trip seat layout.');
@@ -152,11 +153,15 @@ export const SeatMapModal: React.FC<SeatMapModalProps> = ({
                   onChange={(e) => setSelectedStopId(parseInt(e.target.value, 10))}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
-                  {routeStops.map((stop) => (
-                    <option key={stop.stop_id} value={stop.stop_id}>
-                      Stop #{stop.stop_order}: {stop.stop_name} (+{stop.estimated_offset_minutes}m)
-                    </option>
-                  ))}
+                  {routeStops.length === 0 ? (
+                    <option value="">No boarding stops assigned to this route</option>
+                  ) : (
+                    routeStops.map((stop) => (
+                      <option key={stop.stop_id} value={stop.stop_id}>
+                        Stop #{stop.stop_order}: {stop.stop_name} (+{stop.estimated_offset_minutes}m)
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 

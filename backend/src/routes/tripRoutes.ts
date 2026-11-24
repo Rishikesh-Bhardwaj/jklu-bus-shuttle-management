@@ -4,6 +4,7 @@ import {
   getTripById,
   createTrip,
   updateTrip,
+  deleteTrip,
   returnServiceAuditCheck,
 } from '../controllers/tripController.js';
 import { authenticate, requireRole, validateCsrf } from '../middleware/auth.js';
@@ -21,6 +22,7 @@ router.get('/:id', getTripById);
 // Scheduling trips (MANAGER only)
 router.post('/', requireRole('MANAGER'), validateCsrf, createTrip);
 router.put('/:id', requireRole('MANAGER'), validateCsrf, updateTrip);
+router.delete('/:id', requireRole('MANAGER'), validateCsrf, deleteTrip);
 
 export default router;
 

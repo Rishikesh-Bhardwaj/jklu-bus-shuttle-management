@@ -8,7 +8,7 @@ import { pool } from '../config/db.js';
 export async function getPendingVerifications(req: Request, res: Response): Promise<void> {
   try {
     const [rows]: any = await pool.query(
-      `SELECT user_id, email, full_name, role, student_category, phone_number,
+      `SELECT user_id, email, full_name, identification_number, role, student_category, phone_number,
               verification_status, created_at, verification_notes
        FROM users
        WHERE verification_status = 'PENDING' AND role != 'MANAGER'

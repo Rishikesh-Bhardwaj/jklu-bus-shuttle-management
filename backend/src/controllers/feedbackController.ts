@@ -142,26 +142,20 @@ export async function updateFeedback(req: Request, res: Response): Promise<void>
 
 /**
  * DELETE /api/feedback/:id
- * User or MANAGER: Delete feedback.
+ * Passenger self-deletion: Authenticated users can delete their own authored review.
  */
 export async function deleteFeedback(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const userRole = req.user!.role;
     const feedbackId = parseInt(req.params.id, 10);
 
-    let query = `DELETE FROM feedback WHERE feedback_id = ?`;
-    const params: any[] = [feedbackId];
-
-    if (userRole !== 'MANAGER') {
-      query += ` AND user_id = ?`;
-      params.push(userId);
-    }
-
-    const [result]: any = await pool.query(query, params);
+    const [result]: any = await pool.query(
+      'DELETE FROM feedback WHERE feedback_id = ? AND user_id = ?',
+      [feedbackId, userId]
+    );
 
     if (result.affectedRows === 0) {
-      res.status(404).json({ error: 'Feedback record not found or unauthorized.' });
+      res.status(404).json({ error: 'Feedback record not found or not authored by you.' });
       return;
     }
 

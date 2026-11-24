@@ -4,9 +4,11 @@ import {
   getBusById,
   createBus,
   updateBus,
+  deleteBus,
   listDrivers,
   createDriver,
   updateDriver,
+  deleteDriver,
 } from '../controllers/fleetController.js';
 import { authenticate, requireRole, validateCsrf } from '../middleware/auth.js';
 
@@ -20,11 +22,13 @@ router.get('/buses', listBuses);
 router.get('/buses/:id', getBusById);
 router.post('/buses', requireRole('MANAGER'), validateCsrf, createBus);
 router.put('/buses/:id', requireRole('MANAGER'), validateCsrf, updateBus);
+router.delete('/buses/:id', requireRole('MANAGER'), validateCsrf, deleteBus);
 
 // Drivers
 router.get('/drivers', listDrivers);
 router.post('/drivers', requireRole('MANAGER'), validateCsrf, createDriver);
 router.put('/drivers/:id', requireRole('MANAGER'), validateCsrf, updateDriver);
+router.delete('/drivers/:id', requireRole('MANAGER'), validateCsrf, deleteDriver);
 
 export default router;
 

@@ -280,8 +280,8 @@ export async function updateTrip(req: Request, res: Response): Promise<void> {
  * GET /api/trips/audit/return-service-check
  * MANAGER only: Return Service Audit.
  * Inspects all dates with scheduled OUTBOUND trips.
- * Flags any date/corridor lacking a corresponding 6:00 PM (17:30 - 18:30) RETURN trip.
- * STRICT DIRECTIVE: Does NOT fabricate or auto-generate rows. Only surfaces audit warnings!
+ * Checks whether a corresponding RETURN trip is scheduled on that date and corridor without any arbitrary departure time restriction.
+ * STRICT DIRECTIVE: Does NOT fabricate or auto-generate rows.
  */
 export async function returnServiceAuditCheck(req: Request, res: Response): Promise<void> {
   try {
@@ -297,7 +297,7 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
       ORDER BY t.trip_date ASC, c.corridor_name ASC
     `);
 
-    // 2. Find all RETURN trips on those dates between 17:00 and 19:00 (approx. 6:00 PM return slot)
+    // 2. Find all RETURN trips on those dates (scheduled at any valid operational time)
     const [returnTrips]: any = await pool.query(`
       SELECT DISTINCT t.trip_date, r.corridor_id, t.departure_time
       FROM trips t
@@ -305,7 +305,6 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
       WHERE t.direction = 'RETURN'
         AND t.trip_status != 'CANCELLED'
         AND t.trip_date >= CURRENT_DATE()
-        AND t.departure_time BETWEEN '17:00:00' AND '19:00:00'
     `);
 
     const returnSet = new Set<string>();
@@ -314,7 +313,7 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
       returnSet.add(`${dateStr}:${ret.corridor_id}`);
     }
 
-    // 3. Compare and collect warnings
+    // 3. Compare and collect status
     const auditWarnings: any[] = [];
     const compliantCorridors: any[] = [];
 
@@ -328,8 +327,8 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
           corridorId: out.corridor_id,
           corridorName: out.corridor_name,
           routeSample: out.route_name,
-          severity: 'WARNING',
-          message: `Audit Warning: Outbound service scheduled on ${dateStr} for corridor "${out.corridor_name}" without corresponding ~6:00 PM return shuttle service.`,
+          severity: 'INFO',
+          message: `Notice: Outbound service scheduled on ${dateStr} for corridor "${out.corridor_name}" has no return service registered yet.`,
         });
       } else {
         compliantCorridors.push({
@@ -342,16 +341,116 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
     }
 
     res.json({
-      auditStatus: auditWarnings.length === 0 ? 'ALL_RETURN_SERVICES_SCHEDULED' : 'RETURN_SERVICES_DEFICIENT',
+      auditStatus: auditWarnings.length === 0 ? 'ALL_RETURN_SERVICES_SCHEDULED' : 'RETURN_SERVICES_UNSCHEDULED',
       totalOutboundDaysChecked: outboundTrips.length,
       warningCount: auditWarnings.length,
       warnings: auditWarnings,
       compliantCount: compliantCorridors.length,
-      note: 'Zero-fabrication audit report: Warnings indicate missing return service slots for manager action.',
+      note: 'Return service check report: Flexible scheduling without fixed time constraints.',
     });
   } catch (error: any) {
     console.error('[RETURN_SERVICE_AUDIT_ERROR]', error);
     res.status(500).json({ error: 'Failed to perform return service audit check.' });
+  }
+}
+
+/**
+ * DELETE /api/trips/:id
+ * MANAGER only: Cancel or delete a scheduled trip.
+ */
+export async function deleteTrip(req: Request, res: Response): Promise<void> {
+  const connection = await pool.getConnection();
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    if (isNaN(tripId)) {
+      res.status(400).json({ error: 'Invalid trip ID.' });
+      return;
+    }
+
+    const [trips]: any = await pool.query(
+      'SELECT trip_id, route_id, trip_date, departure_time, trip_status FROM trips WHERE trip_id = ?',
+      [tripId]
+    );
+
+    if (trips.length === 0) {
+      res.status(404).json({ error: 'Trip not found.' });
+      return;
+    }
+
+    // Check for any passenger bookings (confirmed, completed, or cancelled)
+    const [bookingStats]: any = await pool.query(
+      'SELECT COUNT(*) AS totalBookings FROM bookings WHERE trip_id = ?',
+      [tripId]
+    );
+
+    const totalBookings = bookingStats[0]?.totalBookings || 0;
+
+    if (totalBookings > 0) {
+      // Trips with passenger bookings are soft-cancelled instead of rejected.
+      // Use a database transaction to update trip status, check-ins, and release seat reservations.
+      await connection.beginTransaction();
+
+      // 1. Update trip status to CANCELLED
+      await connection.query(
+        "UPDATE trips SET trip_status = 'CANCELLED' WHERE trip_id = ?",
+        [tripId]
+      );
+
+      // 2. Update related unboarded check-in records to CANCELLED_PRIOR
+      await connection.query(
+        `UPDATE check_ins ci
+         JOIN bookings b ON ci.booking_id = b.booking_id
+         SET ci.boarding_status = 'CANCELLED_PRIOR'
+         WHERE b.trip_id = ? AND ci.boarding_status = 'NOT_CHECKED_IN'`,
+        [tripId]
+      );
+
+      // 3. Release all seat reservations for that trip
+      await connection.query(
+        'DELETE FROM trip_seat_reservations WHERE trip_id = ?',
+        [tripId]
+      );
+
+      await connection.commit();
+
+      res.json({
+        message: `Trip #${tripId} has associated passenger records. It has been safely cancelled and deactivated to preserve booking and ticket history.`,
+        action: 'CANCELLED',
+        tripId,
+      });
+      return;
+    }
+
+    // Trips without bookings: attempt clean hard deletion of reservations & trip
+    try {
+      await connection.beginTransaction();
+      await connection.query('DELETE FROM trip_seat_reservations WHERE trip_id = ?', [tripId]);
+      await connection.query('DELETE FROM trips WHERE trip_id = ?', [tripId]);
+      await connection.commit();
+      res.json({
+        message: `Scheduled trip #${tripId} has been permanently deleted.`,
+        action: 'DELETED',
+        tripId,
+      });
+    } catch {
+      await connection.rollback();
+      // Fallback: soft cancellation if hard deletion is restricted by database privileges/FKs
+      await connection.beginTransaction();
+      await connection.query("UPDATE trips SET trip_status = 'CANCELLED' WHERE trip_id = ?", [tripId]);
+      await connection.query('DELETE FROM trip_seat_reservations WHERE trip_id = ?', [tripId]);
+      await connection.commit();
+      res.json({
+        message: `Trip #${tripId} has been cancelled and deactivated.`,
+        action: 'CANCELLED',
+        tripId,
+      });
+    }
+  } catch (error: any) {
+    await connection.rollback();
+    console.error('[TRIP_DELETE_ERROR]', error);
+    res.status(500).json({ error: 'Failed to process trip deletion.' });
+  } finally {
+    connection.release();
   }
 }
 

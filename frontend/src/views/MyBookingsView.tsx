@@ -117,27 +117,34 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {bookings.map((b) => {
-            const isConfirmed = b.booking_status === 'CONFIRMED';
+            const isTripCancelled = b.trip_status === 'CANCELLED';
+            const isConfirmed = b.booking_status === 'CONFIRMED' && !isTripCancelled;
             const isBoarded = b.check_in_status === 'BOARDED';
 
             return (
               <div
                 key={b.booking_id}
                 className={`bg-white dark:bg-neutral-900 rounded-2xl border shadow-sm overflow-hidden flex flex-col justify-between transition-colors ${
-                  isConfirmed
+                  isTripCancelled
+                    ? 'border-rose-200 dark:border-rose-900/60 opacity-75'
+                    : isConfirmed
                     ? 'border-neutral-200 dark:border-neutral-800'
                     : 'border-neutral-200 dark:border-neutral-800 opacity-60'
                 }`}
               >
                 {/* Pass Header */}
-                <div className="p-4 bg-primary-900 text-white flex items-center justify-between">
+                <div className={`p-4 text-white flex items-center justify-between ${
+                  isTripCancelled ? 'bg-neutral-800' : 'bg-primary-900'
+                }`}>
                   <div className="flex items-center space-x-2">
-                    <Bus className="w-4 h-4 text-primary-300" />
+                    <Bus className={`w-4 h-4 ${isTripCancelled ? 'text-rose-400' : 'text-primary-300'}`} />
                     <span className="font-bold text-xs uppercase tracking-wider">
-                      JKLU Boarding Pass
+                      {isTripCancelled ? 'JKLU Boarding Pass (Cancelled)' : 'JKLU Boarding Pass'}
                     </span>
                   </div>
-                  <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-primary-800 text-primary-200 font-semibold">
+                  <span className={`font-mono text-[11px] px-2 py-0.5 rounded font-semibold ${
+                    isTripCancelled ? 'bg-rose-950 text-rose-300' : 'bg-primary-800 text-primary-200'
+                  }`}>
                     #{b.booking_id}
                   </span>
                 </div>
@@ -158,7 +165,11 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                       <span className="text-[10px] uppercase font-mono text-neutral-400 block">
                         Assigned Seat
                       </span>
-                      <span className="text-lg font-extrabold text-primary-600 dark:text-primary-400 font-mono">
+                      <span className={`text-lg font-extrabold font-mono ${
+                        isTripCancelled
+                          ? 'text-neutral-400 line-through'
+                          : 'text-primary-600 dark:text-primary-400'
+                      }`}>
                         {b.seat_number}
                       </span>
                     </div>
@@ -198,17 +209,30 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                   </div>
 
                   {/* Boarding Verification QR & Status */}
-                  <div className="p-3 rounded-xl border border-dashed border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                  <div className={`p-3 rounded-xl border border-dashed flex items-center justify-between ${
+                    isTripCancelled
+                      ? 'border-rose-300 dark:border-rose-900/50 bg-rose-50/50 dark:bg-rose-950/20'
+                      : 'border-neutral-200 dark:border-neutral-800'
+                  }`}>
                     <div className="flex items-center space-x-3">
-                      <div className="p-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-neutral-800 dark:text-neutral-200">
+                      <div className={`p-2 rounded-lg ${
+                        isTripCancelled
+                          ? 'bg-rose-100 dark:bg-rose-950 text-rose-500 opacity-60'
+                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200'
+                      }`}>
                         <QrCode className="w-7 h-7" />
                       </div>
                       <div>
                         <span className="text-[10px] text-neutral-400 font-mono block">
-                          Pass Code: JKLU-T{b.trip_id}-S{b.seat_number}
+                          {isTripCancelled ? 'Pass Inactive (Trip Cancelled)' : `Pass Code: JKLU-T${b.trip_id}-S${b.seat_number}`}
                         </span>
                         <div className="flex items-center gap-1.5 font-semibold text-xs mt-0.5">
-                          {isBoarded ? (
+                          {isTripCancelled ? (
+                            <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1 font-bold">
+                              <XCircle className="w-3.5 h-3.5" />
+                              Trip Cancelled by Transport
+                            </span>
+                          ) : isBoarded ? (
                             <span className="text-emerald-600 flex items-center gap-1">
                               <CheckCircle className="w-3.5 h-3.5" />
                               Boarded ({b.boarded_at ? new Date(b.boarded_at).toLocaleTimeString() : ''})
@@ -221,14 +245,14 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                           ) : (
                             <span className="text-rose-600 flex items-center gap-1">
                               <XCircle className="w-3.5 h-3.5" />
-                              Cancelled
+                              Booking Cancelled
                             </span>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    {isConfirmed && !isBoarded && (
+                    {isConfirmed && !isBoarded && !isTripCancelled && (
                       <button
                         onClick={() => setCancelModalBooking(b)}
                         className="px-2.5 py-1 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded border border-rose-200 dark:border-rose-900 transition-colors"

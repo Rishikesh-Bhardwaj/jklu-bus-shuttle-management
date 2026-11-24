@@ -28,7 +28,9 @@ export const TripsView: React.FC<TripsViewProps> = ({ setCurrentView, initialCat
   // Filters
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedDirection, setSelectedDirection] = useState<string>('');
-  const [selectedCorridor, setSelectedCorridor] = useState<string>('');
+  const [selectedCorridor, setSelectedCorridor] = useState<string>(() => {
+    return sessionStorage.getItem('preferred_corridor') || '';
+  });
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory || '');
 
   // Booking Modal
@@ -142,7 +144,14 @@ export const TripsView: React.FC<TripsViewProps> = ({ setCurrentView, initialCat
           </label>
           <select
             value={selectedCorridor}
-            onChange={(e) => setSelectedCorridor(e.target.value)}
+            onChange={(e) => {
+              setSelectedCorridor(e.target.value);
+              if (e.target.value) {
+                sessionStorage.setItem('preferred_corridor', e.target.value);
+              } else {
+                sessionStorage.removeItem('preferred_corridor');
+              }
+            }}
             className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <option value="">All Corridors</option>

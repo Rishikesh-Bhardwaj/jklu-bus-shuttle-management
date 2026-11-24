@@ -17,7 +17,11 @@ const CAMPUS_IMAGES = [
 
 const SLIDE_INTERVAL_MS = 7000; // 7 seconds per slide
 
-export const CampusSlideshow: React.FC = () => {
+interface CampusSlideshowProps {
+  className?: string;
+}
+
+export const CampusSlideshow: React.FC<CampusSlideshowProps> = ({ className = '' }) => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [reducedMotion, setReducedMotion] = useState<boolean>(() => {
     return (
@@ -57,7 +61,7 @@ export const CampusSlideshow: React.FC = () => {
   return (
     <div
       aria-hidden="true"
-      className="fixed inset-0 w-full h-full -z-10 pointer-events-none overflow-hidden select-none"
+      className={`absolute inset-0 w-full h-full pointer-events-none overflow-hidden select-none ${className}`}
     >
       {/* Slideshow Image Stack */}
       {CAMPUS_IMAGES.map((image, index) => {
@@ -81,11 +85,8 @@ export const CampusSlideshow: React.FC = () => {
         );
       })}
 
-      {/* Subtle translucent dark overlay: preserves architectural recognition while ensuring text contrast */}
-      <div className="absolute inset-0 bg-neutral-950/35 dark:bg-black/65" />
-
-      {/* Subtle vertical vignette gradient to enhance header & footer legibility */}
-      <div className="absolute inset-0 bg-gradient-to-b from-neutral-950/40 via-transparent to-neutral-950/50" />
+      {/* Hero media scrim overlay matching Campus Market's directional depth gradient */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/60 to-black/40 backdrop-blur-[0.5px]" />
     </div>
   );
 };

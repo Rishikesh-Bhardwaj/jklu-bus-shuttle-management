@@ -1,6 +1,15 @@
-import React from 'react';
-import { Bus, Moon, Sun, LogOut, User as UserIcon, ShieldAlert, CheckCircle, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Moon,
+  Sun,
+  LogOut,
+  Menu,
+  X,
+  Shield,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { Button } from './ui/Button';
+import { Badge } from './ui/Badge';
 
 interface NavbarProps {
   currentView: string;
@@ -16,152 +25,158 @@ export const Navbar: React.FC<NavbarProps> = ({
   setDarkMode,
 }) => {
   const { user, logout } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+
+  const handleNavClick = (view: string) => {
+    setCurrentView(view);
+    setMobileMenuOpen(false);
+  };
+
+  const navLinks = [
+    { id: 'home', label: 'Home' },
+    { id: 'trips', label: 'Available Shuttles' },
+    { id: 'extra-trips', label: 'Special / Extra' },
+    ...(user ? [{ id: 'my-bookings', label: 'My Passes' }] : []),
+    { id: 'feedback', label: 'Reviews & Feedback' },
+  ];
 
   return (
-    <header className="border-b border-neutral-200/80 dark:border-neutral-800/80 bg-white/95 dark:bg-neutral-950/95 backdrop-blur-md sticky top-0 z-40 transition-colors">
+    <header className="sticky top-0 z-50 border-b border-[#e6dfd5] dark:border-[#232d42] bg-[#faf7f1]/85 dark:bg-[#0b0f17]/85 backdrop-blur-xl transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
-        {/* Brand - Official JKLU Logo at Extreme Top-Left */}
+        {/* Brand Lockup with Campus Market Logo Tile */}
         <div
-          className="flex items-center space-x-3 cursor-pointer select-none"
-          onClick={() => setCurrentView('home')}
+          className="flex items-center gap-3 cursor-pointer select-none group"
+          onClick={() => handleNavClick('home')}
         >
-          <img
-            src="/images/jklu-logo.png"
-            alt="JK Lakshmipat University Logo"
-            className="h-9 sm:h-11 w-auto max-w-[130px] sm:max-w-[160px] object-contain shrink-0"
-          />
-          <div className="h-8 w-px bg-neutral-200 dark:bg-neutral-800 hidden sm:block" />
-          <div className="flex items-center space-x-2">
-            <div className="p-1.5 bg-primary-600 text-white rounded-lg shadow-sm hidden xs:block">
-              <Bus className="w-4 h-4" />
-            </div>
-            <div>
-              <span className="font-bold text-sm sm:text-base text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5 leading-tight">
-                Shuttle Portal
-                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 rounded font-semibold hidden md:inline-block">
-                  Campus Bus
-                </span>
+          <div className="w-10 h-10 rounded-xl bg-white shadow-xs border border-[#e6dfd5] dark:border-neutral-700/80 p-1 flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:scale-105">
+            <img
+              src="/images/jklu-logo.png"
+              alt="JKLU Logo"
+              className="w-full h-full object-contain"
+            />
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2 leading-none">
+              <span className="font-bold text-base tracking-tight text-neutral-900 dark:text-neutral-100">
+                Campus Shuttle
               </span>
-              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 hidden sm:block leading-none mt-0.5">
-                JK Lakshmipat University, Jaipur
-              </p>
+              <Badge variant="primary" size="sm" className="hidden lg:inline-flex text-[10px] py-0 font-bold uppercase tracking-wider">
+                Transit
+              </Badge>
             </div>
+            <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400 leading-none mt-1 hidden sm:block">
+              JK Lakshmipat University
+            </span>
           </div>
         </div>
 
-        {/* Navigation Links */}
-        <nav className="hidden md:flex items-center space-x-1 text-sm font-medium">
-          <button
-            onClick={() => setCurrentView('home')}
-            className={`px-3 py-1.5 rounded-md transition-colors ${
-              currentView === 'home'
-                ? 'bg-neutral-100 dark:bg-neutral-800 text-primary-600 dark:text-primary-400 font-semibold'
-                : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900'
-            }`}
-          >
-            Home
-          </button>
-          <button
-            onClick={() => setCurrentView('trips')}
-            className={`px-3 py-1.5 rounded-md transition-colors ${
-              currentView === 'trips'
-                ? 'bg-neutral-100 dark:bg-neutral-800 text-primary-600 dark:text-primary-400 font-semibold'
-                : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900'
-            }`}
-          >
-            Available Shuttles
-          </button>
-          <button
-            onClick={() => setCurrentView('extra-trips')}
-            className={`px-3 py-1.5 rounded-md transition-colors ${
-              currentView === 'extra-trips'
-                ? 'bg-neutral-100 dark:bg-neutral-800 text-primary-600 dark:text-primary-400 font-semibold'
-                : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900'
-            }`}
-          >
-            Special / Extra Trips
-          </button>
-          {user && (
-            <button
-              onClick={() => setCurrentView('my-bookings')}
-              className={`px-3 py-1.5 rounded-md transition-colors ${
-                currentView === 'my-bookings'
-                  ? 'bg-neutral-100 dark:bg-neutral-800 text-primary-600 dark:text-primary-400 font-semibold'
-                  : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900'
-              }`}
-            >
-              My Bookings
-            </button>
-          )}
-          <button
-            onClick={() => setCurrentView('feedback')}
-            className={`px-3 py-1.5 rounded-md transition-colors ${
-              currentView === 'feedback'
-                ? 'bg-neutral-100 dark:bg-neutral-800 text-primary-600 dark:text-primary-400 font-semibold'
-                : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900'
-            }`}
-          >
-            Reviews & Feedback
-          </button>
+        {/* Desktop Navigation Links */}
+        <nav className="hidden md:flex items-center space-x-1">
+          {navLinks.map((link) => {
+            const isActive = currentView === link.id;
+            return (
+              <button
+                key={link.id}
+                onClick={() => handleNavClick(link.id)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                  isActive
+                    ? 'bg-neutral-200/70 dark:bg-neutral-800/80 text-neutral-900 dark:text-neutral-100 font-semibold'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200/40 dark:hover:bg-neutral-800/40'
+                }`}
+              >
+                {link.label}
+              </button>
+            );
+          })}
 
-          {/* Manager Exclusive Tab */}
+          {/* Manager Portal Tab */}
           {user?.role === 'MANAGER' && (
             <button
-              onClick={() => setCurrentView('manager-portal')}
-              className={`px-3 py-1.5 rounded-md font-semibold text-xs uppercase tracking-wide transition-colors ${
+              onClick={() => handleNavClick('manager-portal')}
+              className={`ml-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1.5 ${
                 currentView === 'manager-portal'
-                  ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
-                  : 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50'
+                  ? 'bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 shadow-warm-sm'
+                  : 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 hover:bg-amber-100'
               }`}
             >
-              Manager Portal
+              <Shield className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Manager Portal</span>
             </button>
           )}
         </nav>
 
-        {/* Right Section: Theme Toggle & Auth State */}
-        <div className="flex items-center space-x-3">
+        {/* Right Section: Pill-Style Theme Toggle, Profile & Auth */}
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* Pill-Style Theme Toggle matching Campus Market */}
           <button
+            type="button"
+            role="switch"
+            aria-checked={darkMode}
             onClick={() => setDarkMode(!darkMode)}
-            className="p-2 rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-            title="Toggle Dark Mode"
-            aria-label="Toggle theme"
+            className="relative inline-flex items-center h-8 px-1 py-0.5 rounded-full bg-[#f2ede4] dark:bg-[#1a2233] border border-[#e6dfd5] dark:border-[#232d42] transition-colors focus-ring select-none text-xs font-medium cursor-pointer"
+            title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
           >
-            {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-neutral-600" />}
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full transition-all duration-200 ${
+                !darkMode
+                  ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              <Sun className="w-3.5 h-3.5 text-amber-500" />
+              <span className="hidden sm:inline">Light</span>
+            </span>
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full transition-all duration-200 ${
+                darkMode
+                  ? 'bg-[#121826] text-neutral-100 shadow-xs font-semibold border border-[#232d42]'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+            >
+              <Moon className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Dark</span>
+            </span>
           </button>
 
           {user ? (
             <div className="flex items-center space-x-2">
-              {/* Affiliation verification badge */}
+              {/* Affiliation verification badge (Students/Faculty) */}
               {user.role !== 'MANAGER' && (
-                <div
-                  className={`hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    user.verificationStatus === 'VERIFIED'
-                      ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                      : user.verificationStatus === 'PENDING'
-                      ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
-                      : 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300'
-                  }`}
-                  title={`Affiliation status: ${user.verificationStatus}`}
-                >
-                  {user.verificationStatus === 'VERIFIED' && <CheckCircle className="w-3 h-3" />}
-                  {user.verificationStatus === 'PENDING' && <Clock className="w-3 h-3" />}
-                  {user.verificationStatus === 'REJECTED' && <ShieldAlert className="w-3 h-3" />}
-                  <span>{user.verificationStatus}</span>
+                <div className="hidden lg:block">
+                  {user.verificationStatus === 'VERIFIED' && (
+                    <Badge variant="success" dot size="sm">Verified</Badge>
+                  )}
+                  {user.verificationStatus === 'PENDING' && (
+                    <Badge variant="warning" dot size="sm">Pending</Badge>
+                  )}
+                  {user.verificationStatus === 'REJECTED' && (
+                    <Badge variant="danger" dot size="sm">Action Req</Badge>
+                  )}
                 </div>
               )}
 
+              {/* User profile button */}
               <button
-                onClick={() => setCurrentView('dashboard')}
-                className="flex items-center space-x-2 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-900 text-xs text-neutral-800 dark:text-neutral-200 transition-colors"
+                onClick={() => handleNavClick('dashboard')}
+                className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-warm-sm ${
+                  currentView === 'dashboard'
+                    ? 'bg-primary-50 dark:bg-primary-950/70 text-primary-700 dark:text-primary-300 border-primary-200 dark:border-primary-800'
+                    : 'bg-white dark:bg-[#121826] border-[#e6dfd5] dark:border-[#232d42] hover:bg-[#f2ede4] dark:hover:bg-[#1a2233] text-neutral-800 dark:text-neutral-200'
+                }`}
               >
-                <UserIcon className="w-3.5 h-3.5 text-primary-600" />
-                <span className="font-medium max-w-[120px] truncate">{user.fullName.split(' ')[0]}</span>
+                <div className="w-5 h-5 rounded-full bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 flex items-center justify-center font-bold text-[10px]">
+                  {user.fullName ? user.fullName.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <span className="max-w-[100px] sm:max-w-[120px] truncate">
+                  {user.fullName.split(' ')[0]}
+                </span>
               </button>
 
+              {/* Sign out */}
               <button
                 onClick={() => logout()}
-                className="p-2 rounded-lg text-neutral-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                className="p-2 rounded-lg text-neutral-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors focus-ring"
                 title="Sign Out"
                 aria-label="Sign out"
               >
@@ -170,22 +185,93 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           ) : (
             <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setCurrentView('login')}
-                className="px-3 py-1.5 text-xs font-semibold text-neutral-700 dark:text-neutral-200 hover:text-primary-600 transition-colors"
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleNavClick('login')}
               >
                 Sign In
-              </button>
-              <button
-                onClick={() => setCurrentView('register')}
-                className="px-3 py-1.5 text-xs font-semibold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors shadow-sm"
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => handleNavClick('register')}
               >
                 Register
+              </Button>
+            </div>
+          )}
+
+          {/* Mobile Menu Hamburger Button */}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="md:hidden p-2 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-[#f2ede4] dark:hover:bg-[#1a2233] transition-colors focus-ring"
+            aria-label="Toggle navigation menu"
+            aria-expanded={mobileMenuOpen}
+          >
+            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Navigation Drawer / Sheet */}
+      {mobileMenuOpen && (
+        <div className="md:hidden border-t border-[#e6dfd5] dark:border-[#232d42] bg-[#faf7f1] dark:bg-[#0b0f17] px-4 pt-3 pb-5 space-y-2 animate-in slide-in-from-top-2 duration-150 shadow-warm">
+          <div className="space-y-1">
+            {navLinks.map((link) => {
+              const isActive = currentView === link.id;
+              return (
+                <button
+                  key={link.id}
+                  onClick={() => handleNavClick(link.id)}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-between transition-colors ${
+                    isActive
+                      ? 'bg-neutral-200/80 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-bold border border-[#e6dfd5] dark:border-[#232d42]'
+                      : 'text-neutral-700 dark:text-neutral-300 hover:bg-[#f2ede4] dark:hover:bg-[#1a2233]'
+                  }`}
+                >
+                  <span>{link.label}</span>
+                </button>
+              );
+            })}
+
+            {user?.role === 'MANAGER' && (
+              <button
+                onClick={() => handleNavClick('manager-portal')}
+                className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
+                  currentView === 'manager-portal'
+                    ? 'bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
+                    : 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Manager Portal</span>
+                </span>
+                <Badge variant="warning" size="sm">MANAGER</Badge>
               </button>
+            )}
+          </div>
+
+          {user && (
+            <div className="pt-3 border-t border-[#e6dfd5] dark:border-[#232d42] flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 flex items-center justify-center font-bold text-xs">
+                  {user.fullName ? user.fullName.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <div className="leading-tight">
+                  <span className="font-bold block text-neutral-900 dark:text-neutral-100">{user.fullName}</span>
+                  <span className="text-[11px] text-neutral-500">{user.email}</span>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => logout()}>
+                Sign Out
+              </Button>
             </div>
           )}
         </div>
-      </div>
+      )}
     </header>
   );
 };

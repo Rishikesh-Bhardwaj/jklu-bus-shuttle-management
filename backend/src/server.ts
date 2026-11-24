@@ -27,12 +27,16 @@ const configuredOrigins = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(',').map((url) => url.trim().replace(/\/$/, ''))
   : [];
 
-const allowedOrigins: string[] = [
-  ...configuredOrigins,
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
+const localDevOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+
+const allowedOrigins: string[] = [
+  ...configuredOrigins,
+  ...(process.env.NODE_ENV !== 'production' ? localDevOrigins : []),
 ].filter(Boolean);
 
 app.use(
@@ -42,7 +46,7 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error(`Origin ${origin} not allowed by CORS`));
+        callback(null, false);
       }
     },
     credentials: true,

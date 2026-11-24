@@ -303,22 +303,29 @@ export async function getBookingById(req: Request, res: Response): Promise<void>
     }
 
     // Boarding pass verification QR code payload
-    const qrPayload = JSON.stringify({
-      bookingId: booking.booking_id,
-      userId: booking.user_id,
-      tripId: booking.trip_id,
-      seat: booking.seat_number,
-      passenger: booking.passenger_name,
-      tripDate: booking.trip_date,
-      departure: booking.departure_time,
-      signature: `JKLU-PASS-${booking.booking_id}-${booking.trip_id}`,
-    });
+    const isTripCancelled = booking.trip_status === 'CANCELLED';
+    const isBookingCancelled = booking.booking_status === 'CANCELLED';
+    const isValidPass = !isTripCancelled && !isBookingCancelled;
+
+    const qrPayload = isValidPass
+      ? JSON.stringify({
+          bookingId: booking.booking_id,
+          userId: booking.user_id,
+          tripId: booking.trip_id,
+          seat: booking.seat_number,
+          passenger: booking.passenger_name,
+          tripDate: booking.trip_date,
+          departure: booking.departure_time,
+          signature: `JKLU-PASS-${booking.booking_id}-${booking.trip_id}`,
+        })
+      : null;
 
     res.json({
       booking,
       boardingPass: {
         qrPayload,
-        verified: booking.booking_status === 'CONFIRMED',
+        verified: isValidPass,
+        tripStatus: booking.trip_status,
       },
     });
   } catch (error: any) {

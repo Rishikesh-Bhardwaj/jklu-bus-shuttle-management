@@ -5,6 +5,7 @@ export interface User {
   userId: number;
   email: string;
   fullName: string;
+  identificationNumber?: string | null;
   role: 'STUDENT' | 'FACULTY' | 'MANAGER';
   studentCategory: 'HOSTELLER' | 'DAY_SCHOLAR' | null;
   phoneNumber?: string;

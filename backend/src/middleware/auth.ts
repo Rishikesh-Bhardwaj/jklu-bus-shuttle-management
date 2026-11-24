@@ -7,6 +7,7 @@ export interface AuthenticatedUser {
   userId: number;
   email: string;
   fullName: string;
+  identificationNumber?: string | null;
   role: 'STUDENT' | 'FACULTY' | 'MANAGER';
   studentCategory: 'HOSTELLER' | 'DAY_SCHOLAR' | null;
   verificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
@@ -51,7 +52,7 @@ export async function authenticate(
 
   try {
     const [rows]: any = await pool.query(
-      `SELECT user_id, email, full_name, role, student_category,
+      `SELECT user_id, email, full_name, identification_number, role, student_category,
               COALESCE(verification_status, 'PENDING') AS verification_status,
               COALESCE(token_version, 1) AS token_version,
               account_status
@@ -85,6 +86,7 @@ export async function authenticate(
       userId: userRecord.user_id,
       email: userRecord.email,
       fullName: userRecord.full_name,
+      identificationNumber: userRecord.identification_number || null,
       role: userRecord.role,
       studentCategory: userRecord.student_category,
       verificationStatus: userRecord.verification_status,
@@ -170,10 +172,22 @@ export function validateCsrf(
     return;
   }
 
-  const allowedOrigins = (process.env.FRONTEND_URL || '')
+  const configuredOrigins = (process.env.FRONTEND_URL || '')
     .split(',')
     .map(origin => origin.trim().replace(/\/$/, ''))
     .filter(Boolean);
+
+  const localDevOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ];
+
+  const allowedOrigins = [
+    ...configuredOrigins,
+    ...(process.env.NODE_ENV !== 'production' ? localDevOrigins : []),
+  ];
 
   const requestOrigin = req.headers.origin;
 

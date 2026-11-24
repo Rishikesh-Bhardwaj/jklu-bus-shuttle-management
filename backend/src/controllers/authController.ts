@@ -52,11 +52,31 @@ export async function getCsrfToken(req: Request, res: Response): Promise<void> {
  */
 export async function register(req: Request, res: Response): Promise<void> {
   try {
-    const { email, password, fullName, role, studentCategory, phoneNumber } = req.body;
+    const {
+      email,
+      password,
+      fullName,
+      role,
+      studentCategory,
+      phoneNumber,
+      identificationNumber,
+      rollNumber,
+      facultyId,
+    } = req.body;
 
     // 1. Mandatory Fields Validation
     if (!email || !password || !fullName || !role) {
       res.status(400).json({ error: 'Email, password, full name, and role are required.' });
+      return;
+    }
+
+    const idNumber = (identificationNumber || rollNumber || facultyId || '').trim();
+    if (role === 'STUDENT' && !idNumber) {
+      res.status(400).json({ error: 'Roll Number is required for student registration.' });
+      return;
+    }
+    if (role === 'FACULTY' && !idNumber) {
+      res.status(400).json({ error: 'Faculty ID is required for faculty registration.' });
       return;
     }
 
@@ -100,27 +120,48 @@ export async function register(req: Request, res: Response): Promise<void> {
     }
 
     // 6. Check for duplicate email
-    const [existing]: any = await pool.query('SELECT user_id FROM users WHERE email = ?', [normalizedEmail]);
-    if (existing.length > 0) {
+    const [existingEmail]: any = await pool.query('SELECT user_id FROM users WHERE email = ?', [normalizedEmail]);
+    if (existingEmail.length > 0) {
       res.status(409).json({ error: 'An account with this email address already exists. Please sign in.' });
       return;
     }
 
-    // 7. Secure Password Hashing
+    // 7. Check for duplicate Roll Number or Faculty ID within their respective role
+    if (idNumber) {
+      const [existingId]: any = await pool.query(
+        'SELECT user_id FROM users WHERE role = ? AND LOWER(identification_number) = ?',
+        [role, idNumber.toLowerCase()]
+      );
+      if (existingId.length > 0) {
+        const idLabel = role === 'STUDENT' ? 'Roll Number' : 'Faculty ID';
+        res.status(409).json({ error: `An account with this ${idLabel} already exists.` });
+        return;
+      }
+    }
+
+    // 8. Secure Password Hashing
     const passwordHash = await hashPassword(password);
 
-    // 8. Insert new user with PENDING verification status
+    // 9. Insert new user with PENDING verification status
     const [result]: any = await pool.query(
       `INSERT INTO users (
-        email, password_hash, full_name, role, student_category, phone_number,
+        email, password_hash, full_name, identification_number, role, student_category, phone_number,
         account_status, verification_status, token_version
-      ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', 'PENDING', 1)`,
-      [normalizedEmail, passwordHash, fullName.trim(), role, sanitizedCategory, phoneNumber ? phoneNumber.trim() : null]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 'PENDING', 1)`,
+      [
+        normalizedEmail,
+        passwordHash,
+        fullName.trim(),
+        idNumber || null,
+        role,
+        sanitizedCategory,
+        phoneNumber ? phoneNumber.trim() : null,
+      ]
     );
 
     const newUserId = result.insertId;
 
-    // 9. Issue HTTP-Only Session Cookie
+    // 10. Issue HTTP-Only Session Cookie
     const token = signJwtToken({
       userId: newUserId,
       email: normalizedEmail,
@@ -136,6 +177,7 @@ export async function register(req: Request, res: Response): Promise<void> {
         userId: newUserId,
         email: normalizedEmail,
         fullName: fullName.trim(),
+        identificationNumber: idNumber || null,
         role,
         studentCategory: sanitizedCategory,
         verificationStatus: 'PENDING',
@@ -143,6 +185,11 @@ export async function register(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (error: any) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      const idLabel = req.body?.role === 'STUDENT' ? 'Roll Number' : 'Faculty ID';
+      res.status(409).json({ error: `An account with this ${idLabel} or email already exists.` });
+      return;
+    }
     res.status(500).json({ error: 'Registration failed: ' + error.message });
   }
 }
@@ -164,7 +211,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
     // 1. Fetch user from database
     const [rows]: any = await pool.query(
-      `SELECT user_id, email, password_hash, full_name, role, student_category,
+      `SELECT user_id, email, password_hash, full_name, identification_number, role, student_category,
               COALESCE(verification_status, 'PENDING') AS verification_status,
               COALESCE(token_version, 1) AS token_version,
               account_status
@@ -209,6 +256,7 @@ export async function login(req: Request, res: Response): Promise<void> {
         userId: user.user_id,
         email: user.email,
         fullName: user.full_name,
+        identificationNumber: user.identification_number || null,
         role: user.role,
         studentCategory: user.student_category,
         verificationStatus: user.verification_status,

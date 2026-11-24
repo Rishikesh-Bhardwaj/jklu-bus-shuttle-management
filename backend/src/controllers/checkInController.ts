@@ -53,7 +53,11 @@ export async function markPassengerBoarded(req: Request, res: Response): Promise
     const managerUserId = req.user!.userId;
 
     const [existing]: any = await pool.query(
-      `SELECT boarding_status FROM check_ins WHERE booking_id = ?`,
+      `SELECT ci.boarding_status, b.booking_status, t.trip_status
+       FROM check_ins ci
+       JOIN bookings b ON ci.booking_id = b.booking_id
+       JOIN trips t ON b.trip_id = t.trip_id
+       WHERE ci.booking_id = ?`,
       [bookingId]
     );
 
@@ -62,12 +66,17 @@ export async function markPassengerBoarded(req: Request, res: Response): Promise
       return;
     }
 
+    if (existing[0].trip_status === 'CANCELLED') {
+      res.status(400).json({ error: 'Cannot check in a passenger for a cancelled trip.' });
+      return;
+    }
+
     if (existing[0].boarding_status === 'BOARDED') {
       res.status(400).json({ error: 'Passenger has already been checked in / boarded.' });
       return;
     }
 
-    if (existing[0].boarding_status === 'CANCELLED_PRIOR') {
+    if (existing[0].boarding_status === 'CANCELLED_PRIOR' || existing[0].booking_status === 'CANCELLED') {
       res.status(400).json({ error: 'Cannot check in a passenger whose booking was cancelled.' });
       return;
     }
@@ -102,7 +111,11 @@ export async function markPassengerNoShow(req: Request, res: Response): Promise<
     const managerUserId = req.user!.userId;
 
     const [existing]: any = await pool.query(
-      `SELECT boarding_status FROM check_ins WHERE booking_id = ?`,
+      `SELECT ci.boarding_status, b.booking_status, t.trip_status
+       FROM check_ins ci
+       JOIN bookings b ON ci.booking_id = b.booking_id
+       JOIN trips t ON b.trip_id = t.trip_id
+       WHERE ci.booking_id = ?`,
       [bookingId]
     );
 
@@ -111,7 +124,12 @@ export async function markPassengerNoShow(req: Request, res: Response): Promise<
       return;
     }
 
-    if (existing[0].boarding_status === 'CANCELLED_PRIOR') {
+    if (existing[0].trip_status === 'CANCELLED') {
+      res.status(400).json({ error: 'Cannot mark no-show for a cancelled trip.' });
+      return;
+    }
+
+    if (existing[0].boarding_status === 'CANCELLED_PRIOR' || existing[0].booking_status === 'CANCELLED') {
       res.status(400).json({ error: 'Cannot mark cancelled booking as no-show.' });
       return;
     }

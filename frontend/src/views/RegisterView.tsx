@@ -11,6 +11,7 @@ export const RegisterView: React.FC<RegisterViewProps> = ({ setCurrentView }) =>
 
   const [formData, setFormData] = useState({
     fullName: '',
+    identificationNumber: '',
     email: '',
     password: '',
     role: 'STUDENT',
@@ -25,8 +26,10 @@ export const RegisterView: React.FC<RegisterViewProps> = ({ setCurrentView }) =>
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.fullName || !formData.email || !formData.password) {
-      setError('Full name, email address, and password are required.');
+    const idLabel = formData.role === 'STUDENT' ? 'Roll Number' : 'Faculty ID';
+
+    if (!formData.fullName.trim() || !formData.identificationNumber.trim() || !formData.email.trim() || !formData.password) {
+      setError(`Full name, ${idLabel}, email address, and password are required.`);
       return;
     }
 
@@ -36,6 +39,7 @@ export const RegisterView: React.FC<RegisterViewProps> = ({ setCurrentView }) =>
 
       const payload: any = {
         fullName: formData.fullName.trim(),
+        identificationNumber: formData.identificationNumber.trim(),
         email: formData.email.trim().toLowerCase(),
         password: formData.password,
         role: formData.role,
@@ -148,7 +152,7 @@ export const RegisterView: React.FC<RegisterViewProps> = ({ setCurrentView }) =>
                 </select>
               </div>
 
-              {formData.role === 'STUDENT' && (
+              {formData.role === 'STUDENT' ? (
                 <div className="space-y-1">
                   <label className="font-semibold text-neutral-700 dark:text-neutral-300">
                     Student Category
@@ -162,7 +166,34 @@ export const RegisterView: React.FC<RegisterViewProps> = ({ setCurrentView }) =>
                     <option value="HOSTELLER">Hosteller</option>
                   </select>
                 </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="font-semibold text-neutral-700 dark:text-neutral-300">
+                    Department / Designation
+                  </label>
+                  <div className="px-3 py-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50 text-neutral-500 text-[11px]">
+                    University Teaching & Research Faculty
+                  </div>
+                </div>
               )}
+            </div>
+
+            {/* Dynamic Roll Number / Faculty ID Field */}
+            <div className="space-y-1">
+              <label className="font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                <span>{formData.role === 'STUDENT' ? 'Roll Number' : 'Faculty ID'}</span>
+                <span className="text-[10px] text-primary-600 dark:text-primary-400 font-medium">Required for Verification</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={formData.identificationNumber}
+                  onChange={(e) => setFormData({ ...formData, identificationNumber: e.target.value })}
+                  placeholder={formData.role === 'STUDENT' ? 'e.g. 2024BTECH001' : 'e.g. FAC202304'}
+                  required
+                  className="w-full px-3 py-2.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-mono text-xs placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
             </div>
 
             <div className="space-y-1">

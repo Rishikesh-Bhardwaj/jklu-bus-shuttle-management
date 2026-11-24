@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { CampusSlideshow } from './components/CampusSlideshow';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { HomeView } from './views/HomeView';
@@ -26,9 +25,11 @@ function AppContent() {
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
+      document.documentElement.dataset.theme = 'dark';
       localStorage.setItem('theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
+      document.documentElement.dataset.theme = 'light';
       localStorage.setItem('theme', 'light');
     }
   }, [darkMode]);
@@ -74,9 +75,7 @@ function AppContent() {
   };
 
   return (
-    <div className="relative min-h-screen text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors">
-      <CampusSlideshow />
-
+    <div className="relative min-h-screen text-text-primary flex flex-col font-sans transition-colors">
       <Navbar
         currentView={currentView}
         setCurrentView={setCurrentView}

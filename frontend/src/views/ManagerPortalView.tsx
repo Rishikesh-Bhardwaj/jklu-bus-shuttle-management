@@ -12,9 +12,10 @@ import {
   Plus,
   Loader2,
   AlertCircle,
-  Clock,
   Eye,
   EyeOff,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -58,8 +59,9 @@ export const ManagerPortalView: React.FC = () => {
   const [newRouteOrigin, setNewRouteOrigin] = useState<string>('');
   const [newRouteDestination, setNewRouteDestination] = useState<string>('');
   const [newRouteDirection, setNewRouteDirection] = useState<'OUTBOUND' | 'RETURN'>('OUTBOUND');
+  const [newRouteSelectedStops, setNewRouteSelectedStops] = useState<number[]>([]);
 
-  // Tab 4: Trip Scheduling & 6:00 PM Audit State
+  // Tab 4: Trip Scheduling State
   const [trips, setTrips] = useState<any[]>([]);
   const [newTripRouteId, setNewTripRouteId] = useState<number | ''>('');
   const [newTripBusId, setNewTripBusId] = useState<number | ''>('');
@@ -68,8 +70,6 @@ export const ManagerPortalView: React.FC = () => {
   const [newTripTime, setNewTripTime] = useState<string>('07:30');
   const [newTripCategory, setNewTripCategory] = useState<'STANDARD' | 'EXTRA'>('STANDARD');
   const [newTripStatus, setNewTripStatus] = useState<'PUBLISHED' | 'SCHEDULED'>('PUBLISHED');
-  const [auditReport, setAuditReport] = useState<any | null>(null);
-  const [runningAudit, setRunningAudit] = useState<boolean>(false);
 
   // Tab 5: Manifest & Check-In State
   const [selectedManifestTripId, setSelectedManifestTripId] = useState<number | ''>('');
@@ -79,6 +79,32 @@ export const ManagerPortalView: React.FC = () => {
 
   // Tab 6: Feedback Moderation State
   const [adminFeedback, setAdminFeedback] = useState<any[]>([]);
+
+  // Delete Confirmation Modal State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    details?: string;
+    itemType: 'bus' | 'driver' | 'corridor' | 'stop' | 'route' | 'trip';
+    itemId: number;
+    itemName: string;
+    isDeactivation?: boolean;
+  } | null>(null);
+  const [processingDelete, setProcessingDelete] = useState<boolean>(false);
+
+  // Bus Reactivation State
+  const [retiredBusPrompt, setRetiredBusPrompt] = useState<{
+    busId: number;
+    busNo: string;
+    totalSeats: number;
+  } | null>(null);
+  const [reactivateConfirmModal, setReactivateConfirmModal] = useState<{
+    isOpen: boolean;
+    busId: number;
+    busNo: string;
+  } | null>(null);
+  const [processingReactivate, setProcessingReactivate] = useState<boolean>(false);
 
   // -------------------------------------------------------------
   // Data Loaders
@@ -216,6 +242,9 @@ export const ManagerPortalView: React.FC = () => {
   // -------------------------------------------------------------
   const handleCreateBus = async (e: React.FormEvent) => {
     e.preventDefault();
+    setRetiredBusPrompt(null);
+    setBannerError(null);
+    setBannerSuccess(null);
     try {
       await apiRequest('/fleet/buses', {
         method: 'POST',
@@ -225,7 +254,36 @@ export const ManagerPortalView: React.FC = () => {
       setNewBusNo('');
       loadFleet();
     } catch (err: any) {
-      setBannerError(err.message || 'Failed to create bus.');
+      if (err.data?.canReactivate && err.data?.bus) {
+        setRetiredBusPrompt({
+          busId: err.data.bus.bus_id,
+          busNo: err.data.bus.bus_no,
+          totalSeats: err.data.bus.total_no_of_seats,
+        });
+        setBannerError(err.message || `Bus "${err.data.bus.bus_no}" already exists as RETIRED.`);
+      } else {
+        setBannerError(err.message || 'Failed to create bus.');
+      }
+    }
+  };
+
+  const handleConfirmReactivate = async () => {
+    if (!reactivateConfirmModal) return;
+    try {
+      setProcessingReactivate(true);
+      setBannerError(null);
+      const res = await apiRequest(`/fleet/buses/${reactivateConfirmModal.busId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'ACTIVE' }),
+      });
+      setBannerSuccess(res.message || `Bus "${reactivateConfirmModal.busNo}" successfully reactivated.`);
+      setRetiredBusPrompt(null);
+      setReactivateConfirmModal(null);
+      loadFleet();
+    } catch (err: any) {
+      setBannerError(err.message || `Failed to reactivate bus "${reactivateConfirmModal.busNo}".`);
+    } finally {
+      setProcessingReactivate(false);
     }
   };
 
@@ -286,20 +344,31 @@ export const ManagerPortalView: React.FC = () => {
   const handleCreateRoute = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const payload: any = {
+        corridorId: newRouteCorridorId,
+        routeName: newRouteName,
+        origin: newRouteOrigin,
+        destination: newRouteDestination,
+        direction: newRouteDirection,
+      };
+
+      if (newRouteSelectedStops.length > 0) {
+        payload.stops = newRouteSelectedStops.map((stopId, idx) => ({
+          stopId,
+          stopOrder: idx + 1,
+          estimatedOffsetMinutes: idx * 10,
+        }));
+      }
+
       await apiRequest('/routes', {
         method: 'POST',
-        body: JSON.stringify({
-          corridorId: newRouteCorridorId,
-          routeName: newRouteName,
-          origin: newRouteOrigin,
-          destination: newRouteDestination,
-          direction: newRouteDirection,
-        }),
+        body: JSON.stringify(payload),
       });
       setBannerSuccess(`Route "${newRouteName}" registered.`);
       setNewRouteName('');
       setNewRouteOrigin('');
       setNewRouteDestination('');
+      setNewRouteSelectedStops([]);
       loadRoutesAndStops();
     } catch (err: any) {
       setBannerError(err.message || 'Failed to create route.');
@@ -307,7 +376,7 @@ export const ManagerPortalView: React.FC = () => {
   };
 
   // -------------------------------------------------------------
-  // Trip Handlers & 6:00 PM Audit
+  // Trip Handlers
   // -------------------------------------------------------------
   const handleCreateTrip = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -351,20 +420,6 @@ export const ManagerPortalView: React.FC = () => {
     }
   };
 
-  const handleRun6PMAudit = async () => {
-    try {
-      setRunningAudit(true);
-      setBannerError(null);
-      const res = await apiRequest('/trips/audit/return-service-check');
-      setAuditReport(res);
-      setBannerSuccess(`Audit check complete: ${res.warningCount} warning(s) found.`);
-    } catch (err: any) {
-      setBannerError(err.message || 'Failed to execute return service audit.');
-    } finally {
-      setRunningAudit(false);
-    }
-  };
-
   // -------------------------------------------------------------
   // Manifest / Check-In Handlers
   // -------------------------------------------------------------
@@ -398,10 +453,53 @@ export const ManagerPortalView: React.FC = () => {
         method: 'PATCH',
         body: JSON.stringify({ moderationStatus: nextStatus }),
       });
-      setBannerSuccess(`Feedback #${feedbackId} moderation set to ${nextStatus}.`);
+      setBannerSuccess(`Feedback #${feedbackId} moderation status updated to ${nextStatus}. Review text, rating, and author details preserved.`);
       loadAdminFeedback();
     } catch (err: any) {
       setBannerError(err.message || 'Failed to moderate feedback.');
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Delete / Deactivate Handlers
+  // -------------------------------------------------------------
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmModal) return;
+    const { itemType, itemId, itemName } = deleteConfirmModal;
+    try {
+      setProcessingDelete(true);
+      setBannerError(null);
+      let res: any;
+      if (itemType === 'bus') {
+        res = await apiRequest(`/fleet/buses/${itemId}`, { method: 'DELETE' });
+        setBannerSuccess(res.message || `Bus ${itemName} successfully removed/retired.`);
+        loadFleet();
+      } else if (itemType === 'driver') {
+        res = await apiRequest(`/fleet/drivers/${itemId}`, { method: 'DELETE' });
+        setBannerSuccess(res.message || `Driver ${itemName} successfully removed/deactivated.`);
+        loadFleet();
+      } else if (itemType === 'corridor') {
+        res = await apiRequest(`/routes/corridors/${itemId}`, { method: 'DELETE' });
+        setBannerSuccess(res.message || `Corridor "${itemName}" successfully deleted.`);
+        loadRoutesAndStops();
+      } else if (itemType === 'stop') {
+        res = await apiRequest(`/routes/stops/${itemId}`, { method: 'DELETE' });
+        setBannerSuccess(res.message || `Stop "${itemName}" successfully deleted.`);
+        loadRoutesAndStops();
+      } else if (itemType === 'route') {
+        res = await apiRequest(`/routes/${itemId}`, { method: 'DELETE' });
+        setBannerSuccess(res.message || `Route "${itemName}" successfully deleted.`);
+        loadRoutesAndStops();
+      } else if (itemType === 'trip') {
+        res = await apiRequest(`/trips/${itemId}`, { method: 'DELETE' });
+        setBannerSuccess(res.message || `Trip #${itemId} successfully removed/cancelled.`);
+        loadTrips();
+      }
+      setDeleteConfirmModal(null);
+    } catch (err: any) {
+      setBannerError(err.message || `Failed to delete ${itemName}.`);
+    } finally {
+      setProcessingDelete(false);
     }
   };
 
@@ -495,7 +593,7 @@ export const ManagerPortalView: React.FC = () => {
           }`}
         >
           <Calendar className="w-4 h-4" />
-          <span>Trip Scheduling & 6PM Audit</span>
+          <span>Trip Scheduling</span>
         </button>
 
         <button
@@ -568,6 +666,7 @@ export const ManagerPortalView: React.FC = () => {
                   <tr>
                     <th className="p-3">User ID</th>
                     <th className="p-3">Full Name</th>
+                    <th className="p-3">Roll / Faculty ID</th>
                     <th className="p-3">University Email</th>
                     <th className="p-3">Role / Category</th>
                     <th className="p-3">Phone</th>
@@ -583,6 +682,15 @@ export const ManagerPortalView: React.FC = () => {
                       </td>
                       <td className="p-3 font-semibold text-neutral-900 dark:text-neutral-100">
                         {u.full_name}
+                      </td>
+                      <td className="p-3 font-mono text-neutral-800 dark:text-neutral-200">
+                        {u.identification_number ? (
+                          <span className="font-semibold px-2 py-0.5 rounded bg-primary-50 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 border border-primary-200/50 dark:border-primary-800/50">
+                            {u.identification_number}
+                          </span>
+                        ) : (
+                          <span className="text-neutral-400 italic">Not provided</span>
+                        )}
                       </td>
                       <td className="p-3 font-mono text-neutral-600 dark:text-neutral-400">
                         {u.email}
@@ -650,13 +758,48 @@ export const ManagerPortalView: React.FC = () => {
               </p>
 
               <form onSubmit={handleCreateBus} className="space-y-3 text-xs">
+                {retiredBusPrompt && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg text-xs space-y-2">
+                    <div className="flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-200">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Bus "{retiredBusPrompt.busNo}" is currently RETIRED</span>
+                    </div>
+                    <p className="text-neutral-600 dark:text-neutral-400">
+                      This bus already has {retiredBusPrompt.totalSeats} physical seats recorded. Would you like to reactivate it instead?
+                    </p>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setReactivateConfirmModal({
+                          isOpen: true,
+                          busId: retiredBusPrompt.busId,
+                          busNo: retiredBusPrompt.busNo,
+                        })}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold flex items-center gap-1.5 shadow-sm transition-colors"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reactivate Bus Now</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRetiredBusPrompt(null)}
+                        className="px-3 py-1.5 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className="font-semibold block mb-1">Bus Number (e.g. RJ14-PA-1234)</label>
                   <input
                     type="text"
                     required
                     value={newBusNo}
-                    onChange={(e) => setNewBusNo(e.target.value)}
+                    onChange={(e) => {
+                      setNewBusNo(e.target.value);
+                      if (retiredBusPrompt) setRetiredBusPrompt(null);
+                    }}
                     placeholder="e.g. JKLU-BUS-01"
                     className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100"
                   />
@@ -699,9 +842,50 @@ export const ManagerPortalView: React.FC = () => {
                         {bus.total_no_of_seats} physical seats generated
                       </span>
                     </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
-                      {bus.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+                        bus.status === 'ACTIVE'
+                          ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                          : bus.status === 'MAINTENANCE'
+                          ? 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                          : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500'
+                      }`}>
+                        {bus.status}
+                      </span>
+                      {bus.status === 'RETIRED' ? (
+                        <button
+                          type="button"
+                          onClick={() => setReactivateConfirmModal({
+                            isOpen: true,
+                            busId: bus.bus_id,
+                            busNo: bus.bus_no,
+                          })}
+                          className="px-2 py-0.5 rounded text-[11px] font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors flex items-center gap-1 shadow-sm"
+                          title="Reactivate Bus"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Reactivate</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmModal({
+                            isOpen: true,
+                            title: 'Retire / Delete Bus',
+                            message: `Are you sure you want to delete or retire bus "${bus.bus_no}"?`,
+                            details: 'If this bus has historical trips or bookings, it will be safely marked RETIRED to preserve audit and passenger history. Active trips must be cancelled or reassigned first.',
+                            itemType: 'bus',
+                            itemId: bus.bus_id,
+                            itemName: bus.bus_no,
+                            isDeactivation: true
+                          })}
+                          className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                          title="Delete / Retire Bus"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -776,9 +960,34 @@ export const ManagerPortalView: React.FC = () => {
                         Licence: {d.licence_number} • Phone: {d.phone_number}
                       </span>
                     </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
-                      {d.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+                        d.status === 'ACTIVE'
+                          ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500'
+                      }`}>
+                        {d.status}
+                      </span>
+                      {d.status !== 'INACTIVE' && (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmModal({
+                            isOpen: true,
+                            title: 'Deactivate / Delete Driver',
+                            message: `Are you sure you want to delete or deactivate driver "${d.driver_name}"?`,
+                            details: 'If this driver is referenced in historical trips, their status will be set to INACTIVE to preserve log integrity. Active trips must be reassigned first.',
+                            itemType: 'driver',
+                            itemId: d.driver_id,
+                            itemName: d.driver_name,
+                            isDeactivation: true
+                          })}
+                          className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                          title="Delete / Deactivate Driver"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -818,10 +1027,26 @@ export const ManagerPortalView: React.FC = () => {
             </form>
 
             <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 space-y-1">
-              <span className="text-[10px] text-neutral-400 uppercase font-mono block">Existing Corridors</span>
+              <span className="text-[10px] text-neutral-400 uppercase font-mono block">Existing Corridors ({corridors.length})</span>
               {corridors.map((c) => (
-                <div key={c.corridor_id} className="p-2 bg-neutral-50 dark:bg-neutral-950 rounded font-medium">
-                  {c.corridor_name}
+                <div key={c.corridor_id} className="p-2 bg-neutral-50 dark:bg-neutral-950 rounded font-medium flex items-center justify-between">
+                  <span>{c.corridor_name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmModal({
+                      isOpen: true,
+                      title: 'Delete Corridor',
+                      message: `Are you sure you want to delete corridor "${c.corridor_name}"?`,
+                      details: 'Corridors assigned to active or existing routes cannot be deleted. All dependent routes must be removed first.',
+                      itemType: 'corridor',
+                      itemId: c.corridor_id,
+                      itemName: c.corridor_name
+                    })}
+                    className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors"
+                    title="Delete Corridor"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               ))}
             </div>
@@ -853,10 +1078,26 @@ export const ManagerPortalView: React.FC = () => {
             </form>
 
             <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 space-y-1 max-h-56 overflow-y-auto">
-              <span className="text-[10px] text-neutral-400 uppercase font-mono block">Existing Stops</span>
+              <span className="text-[10px] text-neutral-400 uppercase font-mono block">Existing Stops ({stops.length})</span>
               {stops.map((s) => (
-                <div key={s.stop_id} className="p-1.5 bg-neutral-50 dark:bg-neutral-950 rounded text-[11px]">
-                  {s.stop_name}
+                <div key={s.stop_id} className="p-1.5 bg-neutral-50 dark:bg-neutral-950 rounded text-[11px] flex items-center justify-between">
+                  <span>{s.stop_name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmModal({
+                      isOpen: true,
+                      title: 'Delete Boarding Stop',
+                      message: `Are you sure you want to delete stop "${s.stop_name}"?`,
+                      details: 'Stops currently assigned to routes or historical bookings cannot be deleted until those references are cleared.',
+                      itemType: 'stop',
+                      itemId: s.stop_id,
+                      itemName: s.stop_name
+                    })}
+                    className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors"
+                    title="Delete Stop"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               ))}
             </div>
@@ -934,6 +1175,38 @@ export const ManagerPortalView: React.FC = () => {
                 </select>
               </div>
 
+              <div>
+                <label className="font-semibold block mb-1">
+                  Assign Stops to Route <span className="text-[11px] font-normal text-neutral-400">(Optional - Auto-assigns Origin & Destination if omitted)</span>
+                </label>
+                {stops.length === 0 ? (
+                  <p className="text-[11px] text-neutral-400 italic">No intermediate stops created yet. Origin and Destination will be registered automatically.</p>
+                ) : (
+                  <div className="max-h-36 overflow-y-auto space-y-1 p-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950">
+                    {stops.map((s) => {
+                      const isChecked = newRouteSelectedStops.includes(s.stop_id);
+                      return (
+                        <label key={s.stop_id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-900 p-1 rounded">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setNewRouteSelectedStops([...newRouteSelectedStops, s.stop_id]);
+                              } else {
+                                setNewRouteSelectedStops(newRouteSelectedStops.filter((id) => id !== s.stop_id));
+                              }
+                            }}
+                            className="rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                          />
+                          <span className="text-neutral-800 dark:text-neutral-200">{s.stop_name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               <button
                 type="submit"
                 className="w-full py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold"
@@ -942,74 +1215,78 @@ export const ManagerPortalView: React.FC = () => {
               </button>
             </form>
           </div>
+
+          {/* Registered Directional Routes List */}
+          <div className="lg:col-span-3 p-5 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-3 text-xs">
+            <h4 className="font-bold text-xs uppercase tracking-wider text-neutral-500">
+              Registered Directional Routes ({routes.length})
+            </h4>
+            {routes.length === 0 ? (
+              <p className="text-neutral-400 py-3 text-center">No routes registered yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-neutral-50 dark:bg-neutral-950 border-b border-neutral-200 dark:border-neutral-800 text-neutral-500 uppercase font-mono text-[10px]">
+                    <tr>
+                      <th className="p-2.5">Route ID</th>
+                      <th className="p-2.5">Route Name</th>
+                      <th className="p-2.5">Corridor</th>
+                      <th className="p-2.5">Direction</th>
+                      <th className="p-2.5">Origin → Destination</th>
+                      <th className="p-2.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                    {routes.map((r) => (
+                      <tr key={r.route_id} className="hover:bg-neutral-50 dark:hover:bg-neutral-950/40">
+                        <td className="p-2.5 font-mono font-bold">#{r.route_id}</td>
+                        <td className="p-2.5 font-semibold text-neutral-900 dark:text-neutral-100">{r.route_name}</td>
+                        <td className="p-2.5 text-neutral-600 dark:text-neutral-400">{r.corridor_name || `Corridor #${r.corridor_id}`}</td>
+                        <td className="p-2.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+                            r.direction === 'OUTBOUND'
+                              ? 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
+                              : 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300'
+                          }`}>
+                            {r.direction}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-neutral-600 dark:text-neutral-400 font-mono text-[11px]">
+                          {r.origin} → {r.destination}
+                        </td>
+                        <td className="p-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setDeleteConfirmModal({
+                              isOpen: true,
+                              title: 'Delete Route',
+                              message: `Are you sure you want to delete route "${r.route_name}"?`,
+                              details: 'Routes assigned to scheduled trips or paired return routes cannot be deleted until those references are removed.',
+                              itemType: 'route',
+                              itemId: r.route_id,
+                              itemName: r.route_name
+                            })}
+                            className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors"
+                            title="Delete Route"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* ============================================================== */}
-      {/* TAB 4: TRIP SCHEDULING & 6:00 PM AUDIT */}
+      {/* TAB 4: TRIP SCHEDULING */}
       {/* ============================================================== */}
       {activeTab === 'trips' && (
         <div className="space-y-6">
-          {/* 6:00 PM Return Service Audit Button & Report Card */}
-          <div className="p-6 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950 text-white rounded-2xl border border-amber-500/30 shadow-md space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-semibold mb-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>University Return Service Guarantee</span>
-                </div>
-                <h3 className="text-lg font-bold">
-                  6:00 PM Return Shuttle Service Audit Check
-                </h3>
-                <p className="text-xs text-neutral-300 max-w-xl">
-                  Inspects all scheduled OUTBOUND campus departures and verifies whether a corresponding ~6:00 PM (17:30–18:30) RETURN service is scheduled. Zero-fabrication enforcement: surfaces actionable audit alerts for transport managers.
-                </p>
-              </div>
-
-              <button
-                onClick={handleRun6PMAudit}
-                disabled={runningAudit}
-                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs flex items-center gap-2 shrink-0 transition-colors shadow-sm"
-              >
-                {runningAudit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
-                <span>Execute Return Service Audit</span>
-              </button>
-            </div>
-
-            {auditReport && (
-              <div className="p-4 rounded-xl bg-black/40 border border-amber-500/30 space-y-3 text-xs animate-in fade-in duration-200">
-                <div className="flex items-center justify-between border-b border-neutral-700 pb-2">
-                  <span className="font-mono text-amber-300 font-bold">
-                    STATUS: {auditReport.auditStatus}
-                  </span>
-                  <span className="text-[11px] text-neutral-400">
-                    Checked {auditReport.totalOutboundDaysChecked} outbound day-corridors
-                  </span>
-                </div>
-
-                {auditReport.warningCount === 0 ? (
-                  <div className="text-emerald-400 flex items-center gap-2 font-medium">
-                    <CheckCircle className="w-4 h-4" />
-                    <span>Compliant: All scheduled outbound dates have corresponding 6:00 PM return service slots.</span>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-amber-200 font-medium">
-                      ⚠️ Found {auditReport.warningCount} deficient return service slot(s):
-                    </p>
-                    <ul className="space-y-1.5 text-rose-300 font-mono text-[11px]">
-                      {auditReport.warnings.map((w: any, idx: number) => (
-                        <li key={idx} className="p-2 rounded bg-rose-950/40 border border-rose-900/50">
-                          {w.message}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
           {/* Schedule New Trip Form */}
           <div className="p-6 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
             <h3 className="font-bold text-sm text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
@@ -1191,6 +1468,23 @@ export const ManagerPortalView: React.FC = () => {
                               Cancel
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => setDeleteConfirmModal({
+                              isOpen: true,
+                              title: 'Delete / Cancel Trip',
+                              message: `Are you sure you want to delete or cancel trip #${t.trip_id} (${t.route_name})?`,
+                              details: 'Trips with passenger bookings will be safely deactivated and marked as CANCELLED to preserve booking records, digital tickets, and manifest history. Trips with 0 bookings will be removed completely.',
+                              itemType: 'trip',
+                              itemId: t.trip_id,
+                              itemName: `Trip #${t.trip_id} (${t.route_name})`,
+                              isDeactivation: true
+                            })}
+                            className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors inline-flex items-center"
+                            title="Delete / Cancel Trip"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1404,20 +1698,27 @@ export const ManagerPortalView: React.FC = () => {
                     className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
                       f.moderation_status === 'PUBLISHED'
                         ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
-                        : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
+                        : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
                     }`}
                   >
                     {f.moderation_status}
                   </span>
                   <button
+                    type="button"
                     onClick={() => handleToggleFeedbackStatus(f.feedback_id, f.moderation_status)}
-                    className="p-1.5 rounded border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-                    title={f.moderation_status === 'PUBLISHED' ? 'Hide Review' : 'Publish Review'}
+                    className="px-2.5 py-1 rounded border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors flex items-center gap-1.5 text-[11px] font-medium"
+                    title={f.moderation_status === 'PUBLISHED' ? 'Hide Review from Public Feed' : 'Restore & Publish Review'}
                   >
                     {f.moderation_status === 'PUBLISHED' ? (
-                      <EyeOff className="w-3.5 h-3.5 text-neutral-500" />
+                      <>
+                        <EyeOff className="w-3.5 h-3.5 text-neutral-500" />
+                        <span>Hide / Moderate</span>
+                      </>
                     ) : (
-                      <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                      <>
+                        <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Publish Review</span>
+                      </>
                     )}
                   </button>
                 </div>
@@ -1434,9 +1735,16 @@ export const ManagerPortalView: React.FC = () => {
             <h3 className="font-bold text-base text-neutral-900 dark:text-neutral-100">
               Confirm Affiliation {reviewDecision}
             </h3>
-            <p className="text-xs text-neutral-500">
-              User: <strong className="text-neutral-900 dark:text-neutral-100">{reviewNotesModalUser.full_name}</strong> ({reviewNotesModalUser.email})
-            </p>
+            <div className="text-xs text-neutral-600 dark:text-neutral-400 space-y-1 bg-neutral-50 dark:bg-neutral-950 p-3 rounded-lg border border-neutral-200 dark:border-neutral-800">
+              <p>User: <strong className="text-neutral-900 dark:text-neutral-100">{reviewNotesModalUser.full_name}</strong> ({reviewNotesModalUser.email})</p>
+              <p>Role: <span className="font-semibold">{reviewNotesModalUser.role}</span> {reviewNotesModalUser.student_category ? `(${reviewNotesModalUser.student_category})` : ''}</p>
+              <p>
+                {reviewNotesModalUser.role === 'STUDENT' ? 'Roll Number' : 'Faculty ID'}:{' '}
+                <strong className="text-neutral-900 dark:text-neutral-100 font-mono">
+                  {reviewNotesModalUser.identification_number || 'Not provided'}
+                </strong>
+              </p>
+            </div>
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
@@ -1530,6 +1838,117 @@ export const ManagerPortalView: React.FC = () => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Delete / Deactivate Confirmation Dialog Modal */}
+      {deleteConfirmModal && deleteConfirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-bold text-base text-neutral-900 dark:text-neutral-100">
+                  {deleteConfirmModal.title}
+                </h3>
+                <p className="text-xs text-neutral-600 dark:text-neutral-300">
+                  {deleteConfirmModal.message}
+                </p>
+              </div>
+            </div>
+
+            {deleteConfirmModal.details && (
+              <div className="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-[11px] text-neutral-500 space-y-1">
+                <span className="font-semibold block text-neutral-700 dark:text-neutral-300">Notice:</span>
+                <p>{deleteConfirmModal.details}</p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmModal(null)}
+                disabled={processingDelete}
+                className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={processingDelete}
+                className="px-4 py-2 text-xs font-semibold rounded-lg text-white bg-rose-600 hover:bg-rose-700 shadow-sm flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              >
+                {processingDelete ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{deleteConfirmModal.isDeactivation ? 'Confirm Deactivate / Delete' : 'Confirm Delete'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reactivate Bus Confirmation Dialog Modal */}
+      {reactivateConfirmModal && reactivateConfirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-600 shrink-0">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-bold text-base text-neutral-900 dark:text-neutral-100">
+                  Reactivate Bus
+                </h3>
+                <p className="text-xs text-neutral-600 dark:text-neutral-300">
+                  Are you sure you want to reactivate bus "{reactivateConfirmModal.busNo}"?
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-[11px] text-neutral-500 space-y-1">
+              <span className="font-semibold block text-neutral-700 dark:text-neutral-300">Notice:</span>
+              <p>Reactivating this bus will restore its status to ACTIVE, making it immediately available for scheduling shuttle trips. Its existing physical seat inventory will be preserved without creating duplicate records.</p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setReactivateConfirmModal(null)}
+                disabled={processingReactivate}
+                className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReactivate}
+                disabled={processingReactivate}
+                className="px-4 py-2 text-xs font-semibold rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              >
+                {processingReactivate ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Reactivating...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Confirm Reactivation</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
