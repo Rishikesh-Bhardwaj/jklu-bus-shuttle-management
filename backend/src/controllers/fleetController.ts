@@ -173,121 +173,73 @@ export async function updateBus(req: Request, res: Response): Promise<void> {
  * MANAGER only: Retire/deactivate or delete bus.
  */
 export async function deleteBus(req: Request, res: Response): Promise<void> {
-  try {
-    const busId = parseInt(req.params.id, 10);
-    if (isNaN(busId)) {
-      res.status(400).json({ error: 'Invalid bus ID.' });
-      return;
-    }
+  const busId = parseInt(req.params.id, 10);
+  if (isNaN(busId)) {
+    res.status(400).json({ error: 'Invalid bus ID.' });
+    return;
+  }
 
-    const [buses]: any = await pool.query(
-      'SELECT bus_id, bus_no, status FROM buses WHERE bus_id = ?',
+  const connection = await pool.getConnection();
+  try {
+    const [buses]: any = await connection.query(
+      'SELECT bus_id, bus_no FROM buses WHERE bus_id = ?',
       [busId]
     );
-
     if (buses.length === 0) {
       res.status(404).json({ error: 'Bus not found.' });
       return;
     }
 
     const bus = buses[0];
-
-    // 1. Check for active or upcoming scheduled trips
-    const [activeTrips]: any = await pool.query(
-      `SELECT COUNT(*) AS count FROM trips 
-       WHERE bus_id = ? 
-         AND trip_status IN ('SCHEDULED', 'PUBLISHED') 
-         AND trip_date >= CURRENT_DATE()`,
-      [busId]
-    );
-
-    if (activeTrips[0].count > 0) {
-      res.status(400).json({
-        error: `Cannot delete bus "${bus.bus_no}": It is assigned to ${activeTrips[0].count} active or upcoming trip(s). Please reassign or cancel those trips first.`,
-      });
-      return;
-    }
-
-    // 2. Check both historical trips AND historical bookings referencing seats of this bus
-    const [historicalTrips]: any = await pool.query(
+    const [tripRows]: any = await connection.query(
       'SELECT COUNT(*) AS count FROM trips WHERE bus_id = ?',
       [busId]
     );
-
-    const [historicalBookings]: any = await pool.query(
-      `SELECT COUNT(*) AS count 
-       FROM bookings b 
-       JOIN seats s ON b.seat_id = s.seat_id 
+    const [bookingRows]: any = await connection.query(
+      `SELECT COUNT(*) AS count
+       FROM bookings b
+       JOIN seats s ON b.seat_id = s.seat_id
        WHERE s.bus_id = ?`,
       [busId]
     );
 
-    const tripCount = historicalTrips[0]?.count || 0;
-    const bookingCount = historicalBookings[0]?.count || 0;
-    const hasHistoricalRecords = tripCount > 0 || bookingCount > 0;
-
-    if (hasHistoricalRecords) {
-      // Soft deletion: retire the bus to preserve trip & booking history
-      await pool.query(
-        "UPDATE buses SET status = 'RETIRED' WHERE bus_id = ?",
-        [busId]
-      );
-      res.json({
-        message: `Bus "${bus.bus_no}" has historical records (${tripCount} trip(s), ${bookingCount} booking(s)). It has been deactivated and marked as RETIRED to preserve audit history.`,
-        action: 'RETIRED',
-        busId,
+    const tripCount = Number(tripRows[0]?.count || 0);
+    const bookingCount = Number(bookingRows[0]?.count || 0);
+    if (tripCount > 0 || bookingCount > 0) {
+      res.status(409).json({
+        error: `Cannot permanently delete bus "${bus.bus_no}": it is referenced by ${tripCount} trip(s) and ${bookingCount} booking(s). Reassign or resolve those records first. No data was changed.`,
+        dependencies: { trips: tripCount, bookings: bookingCount },
       });
       return;
     }
 
-    // 3. If zero historical records exist: attempt clean hard deletion of seats and bus in a transaction
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      await connection.query('DELETE FROM seats WHERE bus_id = ?', [busId]);
-      await connection.query('DELETE FROM buses WHERE bus_id = ?', [busId]);
-      await connection.commit();
-      res.json({
-        message: `Bus "${bus.bus_no}" and its seat inventory have been permanently deleted.`,
-        action: 'DELETED',
-        busId,
-      });
-    } catch (delError: any) {
-      await connection.rollback();
-
-      // Check for genuine foreign-key constraint error (e.g. ER_ROW_IS_REFERENCED_2, errno 1451, errno 1217)
-      const isForeignKeyConstraint =
-        delError.code === 'ER_ROW_IS_REFERENCED_2' ||
-        delError.code === 'ER_ROW_IS_REFERENCED' ||
-        delError.errno === 1451 ||
-        delError.errno === 1217;
-
-      if (isForeignKeyConstraint) {
-        // Genuine FK constraint prevented deletion; safely fall back to RETIRED
-        console.warn(`[FLEET_BUS_DELETE_WARN] Bus ${busId} has relational dependencies (${delError.code}). Falling back to RETIRED.`);
-        await pool.query(
-          "UPDATE buses SET status = 'RETIRED' WHERE bus_id = ?",
-          [busId]
-        );
-        res.json({
-          message: `Bus "${bus.bus_no}" has relational dependencies and has been safely marked as RETIRED.`,
-          action: 'RETIRED',
-          busId,
-        });
-        return;
-      }
-
-      // For permission errors, connection drops, or unexpected failures, log and return error
-      console.error('[FLEET_BUS_DELETE_ERROR] Deletion failed unexpectedly:', delError);
-      res.status(500).json({
-        error: `Failed to permanently delete bus "${bus.bus_no}": ${delError.sqlMessage || delError.message || 'Database error'}. The record was not retired.`,
-      });
-    } finally {
-      connection.release();
+    await connection.beginTransaction();
+    await connection.query('DELETE FROM seats WHERE bus_id = ?', [busId]);
+    const [deleteResult]: any = await connection.query(
+      'DELETE FROM buses WHERE bus_id = ?',
+      [busId]
+    );
+    if (deleteResult.affectedRows !== 1) {
+      throw new Error('Bus was not deleted; no matching record remained.');
     }
+    await connection.commit();
+
+    res.json({
+      message: `Bus "${bus.bus_no}" and its seat inventory have been permanently deleted.`,
+      action: 'DELETED',
+      busId,
+    });
   } catch (error: any) {
+    try { await connection.rollback(); } catch { /* transaction may not have started */ }
+    const isForeignKey = error.code === 'ER_ROW_IS_REFERENCED_2' || error.errno === 1451;
     console.error('[FLEET_BUS_DELETE_ERROR]', error);
-    res.status(500).json({ error: 'Failed to process bus deletion.' });
+    res.status(isForeignKey ? 409 : 500).json({
+      error: isForeignKey
+        ? `Cannot permanently delete bus: another record still references this bus or its seats. No data was changed.`
+        : `Failed to permanently delete bus: ${error.sqlMessage || error.message || 'Database error'}`,
+    });
+  } finally {
+    connection.release();
   }
 }
 
@@ -385,88 +337,57 @@ export async function updateDriver(req: Request, res: Response): Promise<void> {
  * MANAGER only: Deactivate or delete driver.
  */
 export async function deleteDriver(req: Request, res: Response): Promise<void> {
-  try {
-    const driverId = parseInt(req.params.id, 10);
-    if (isNaN(driverId)) {
-      res.status(400).json({ error: 'Invalid driver ID.' });
-      return;
-    }
+  const driverId = parseInt(req.params.id, 10);
+  if (isNaN(driverId)) {
+    res.status(400).json({ error: 'Invalid driver ID.' });
+    return;
+  }
 
+  try {
     const [drivers]: any = await pool.query(
-      'SELECT driver_id, driver_name, status FROM drivers WHERE driver_id = ?',
+      'SELECT driver_id, driver_name FROM drivers WHERE driver_id = ?',
       [driverId]
     );
-
     if (drivers.length === 0) {
       res.status(404).json({ error: 'Driver not found.' });
       return;
     }
 
     const driver = drivers[0];
-
-    // 1. Check for active or upcoming scheduled trips
-    const [activeTrips]: any = await pool.query(
-      `SELECT COUNT(*) AS count FROM trips 
-       WHERE driver_id = ? 
-         AND trip_status IN ('SCHEDULED', 'PUBLISHED') 
-         AND trip_date >= CURRENT_DATE()`,
-      [driverId]
-    );
-
-    if (activeTrips[0].count > 0) {
-      res.status(400).json({
-        error: `Cannot delete driver "${driver.driver_name}": Driver is assigned to ${activeTrips[0].count} active or upcoming trip(s). Please reassign those trips first.`,
-      });
-      return;
-    }
-
-    // 2. Check for historical trips
-    const [historicalTrips]: any = await pool.query(
+    const [tripRows]: any = await pool.query(
       'SELECT COUNT(*) AS count FROM trips WHERE driver_id = ?',
       [driverId]
     );
-
-    if (historicalTrips[0].count > 0) {
-      // Soft deletion: mark driver INACTIVE to preserve historical trip logs
-      await pool.query(
-        "UPDATE drivers SET status = 'INACTIVE' WHERE driver_id = ?",
-        [driverId]
-      );
-      res.json({
-        message: `Driver "${driver.driver_name}" has historical trip logs. They have been deactivated and marked as INACTIVE.`,
-        action: 'DEACTIVATED',
-        driverId,
+    const tripCount = Number(tripRows[0]?.count || 0);
+    if (tripCount > 0) {
+      res.status(409).json({
+        error: `Cannot permanently delete driver "${driver.driver_name}": the driver is referenced by ${tripCount} trip(s). Reassign or remove those trip records first. No data was changed.`,
+        dependencies: { trips: tripCount },
       });
       return;
     }
 
-    // 3. If zero trips ever: attempt clean delete, fallback to INACTIVE
-    try {
-      const [result]: any = await pool.query('DELETE FROM drivers WHERE driver_id = ?', [driverId]);
-      if (result.affectedRows > 0) {
-        res.json({
-          message: `Driver "${driver.driver_name}" has been permanently deleted.`,
-          action: 'DELETED',
-          driverId,
-        });
-        return;
-      }
-    } catch {
-      // Fallback
-    }
-
-    await pool.query(
-      "UPDATE drivers SET status = 'INACTIVE' WHERE driver_id = ?",
+    const [result]: any = await pool.query(
+      'DELETE FROM drivers WHERE driver_id = ?',
       [driverId]
     );
+    if (result.affectedRows !== 1) {
+      res.status(404).json({ error: 'Driver not found or already deleted.' });
+      return;
+    }
+
     res.json({
-      message: `Driver "${driver.driver_name}" has been deactivated and marked as INACTIVE.`,
-      action: 'DEACTIVATED',
+      message: `Driver "${driver.driver_name}" has been permanently deleted.`,
+      action: 'DELETED',
       driverId,
     });
   } catch (error: any) {
+    const isForeignKey = error.code === 'ER_ROW_IS_REFERENCED_2' || error.errno === 1451;
     console.error('[FLEET_DRIVER_DELETE_ERROR]', error);
-    res.status(500).json({ error: 'Failed to process driver deletion.' });
+    res.status(isForeignKey ? 409 : 500).json({
+      error: isForeignKey
+        ? 'Cannot permanently delete this driver because another record still references them. No data was changed.'
+        : `Failed to permanently delete driver: ${error.sqlMessage || error.message || 'Database error'}`,
+    });
   }
 }
-
