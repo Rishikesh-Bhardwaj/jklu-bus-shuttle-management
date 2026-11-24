@@ -853,6 +853,7 @@ export const ManagerPortalView: React.FC = () => {
                         {bus.status}
                       </span>
                       {bus.status === 'RETIRED' ? (
+                        <>
                         <button
                           type="button"
                           onClick={() => setReactivateConfirmModal({
@@ -882,6 +883,7 @@ export const ManagerPortalView: React.FC = () => {
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
+                        </>
                       ) : (
                         <button
                           type="button"
