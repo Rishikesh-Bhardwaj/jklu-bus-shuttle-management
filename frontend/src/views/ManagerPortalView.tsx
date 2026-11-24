@@ -472,11 +472,11 @@ export const ManagerPortalView: React.FC = () => {
       let res: any;
       if (itemType === 'bus') {
         res = await apiRequest(`/fleet/buses/${itemId}`, { method: 'DELETE' });
-        setBannerSuccess(res.message || `Bus ${itemName} successfully removed/retired.`);
+        setBannerSuccess(res.message || `Bus ${itemName} permanently deleted.`);
         loadFleet();
       } else if (itemType === 'driver') {
         res = await apiRequest(`/fleet/drivers/${itemId}`, { method: 'DELETE' });
-        setBannerSuccess(res.message || `Driver ${itemName} successfully removed/deactivated.`);
+        setBannerSuccess(res.message || `Driver ${itemName} permanently deleted.`);
         loadFleet();
       } else if (itemType === 'corridor') {
         res = await apiRequest(`/routes/corridors/${itemId}`, { method: 'DELETE' });
@@ -492,7 +492,7 @@ export const ManagerPortalView: React.FC = () => {
         loadRoutesAndStops();
       } else if (itemType === 'trip') {
         res = await apiRequest(`/trips/${itemId}`, { method: 'DELETE' });
-        setBannerSuccess(res.message || `Trip #${itemId} successfully removed/cancelled.`);
+        setBannerSuccess(res.message || `Trip #${itemId} permanently deleted.`);
         loadTrips();
       }
       setDeleteConfirmModal(null);
@@ -871,16 +871,16 @@ export const ManagerPortalView: React.FC = () => {
                           type="button"
                           onClick={() => setDeleteConfirmModal({
                             isOpen: true,
-                            title: 'Retire / Delete Bus',
-                            message: `Are you sure you want to delete or retire bus "${bus.bus_no}"?`,
-                            details: 'If this bus has historical trips or bookings, it will be safely marked RETIRED to preserve audit and passenger history. Active trips must be cancelled or reassigned first.',
+                            title: 'Permanently Delete Bus',
+                            message: `Are you sure you want to permanently delete bus "${bus.bus_no}" and its seat inventory?`,
+                            details: 'Deletion is allowed only when no trips or passenger bookings reference this bus. Otherwise, the request will be blocked and the records will remain unchanged.',
                             itemType: 'bus',
                             itemId: bus.bus_id,
                             itemName: bus.bus_no,
                             isDeactivation: true
                           })}
                           className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                          title="Delete / Retire Bus"
+                          title="Permanently Delete Bus"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -968,25 +968,22 @@ export const ManagerPortalView: React.FC = () => {
                       }`}>
                         {d.status}
                       </span>
-                      {d.status !== 'INACTIVE' && (
-                        <button
-                          type="button"
-                          onClick={() => setDeleteConfirmModal({
-                            isOpen: true,
-                            title: 'Deactivate / Delete Driver',
-                            message: `Are you sure you want to delete or deactivate driver "${d.driver_name}"?`,
-                            details: 'If this driver is referenced in historical trips, their status will be set to INACTIVE to preserve log integrity. Active trips must be reassigned first.',
-                            itemType: 'driver',
-                            itemId: d.driver_id,
-                            itemName: d.driver_name,
-                            isDeactivation: true
-                          })}
-                          className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                          title="Delete / Deactivate Driver"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmModal({
+                          isOpen: true,
+                          title: 'Permanently Delete Driver',
+                          message: `Are you sure you want to permanently delete driver "${d.driver_name}"?`,
+                          details: 'Deletion is allowed only when no trip references this driver. Otherwise, the request will be blocked and the records will remain unchanged.',
+                          itemType: 'driver',
+                          itemId: d.driver_id,
+                          itemName: d.driver_name
+                        })}
+                        className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                        title="Permanently Delete Driver"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1472,16 +1469,16 @@ export const ManagerPortalView: React.FC = () => {
                             type="button"
                             onClick={() => setDeleteConfirmModal({
                               isOpen: true,
-                              title: 'Delete / Cancel Trip',
-                              message: `Are you sure you want to delete or cancel trip #${t.trip_id} (${t.route_name})?`,
-                              details: 'Trips with passenger bookings will be safely deactivated and marked as CANCELLED to preserve booking records, digital tickets, and manifest history. Trips with 0 bookings will be removed completely.',
+                              title: 'Permanently Delete Trip',
+                              message: `Are you sure you want to permanently delete trip #${t.trip_id} (${t.route_name})?`,
+                              details: 'Trips with passenger bookings cannot be deleted until those bookings are handled. A blocked deletion will not cancel the trip or modify passenger records.',
                               itemType: 'trip',
                               itemId: t.trip_id,
                               itemName: `Trip #${t.trip_id} (${t.route_name})`,
                               isDeactivation: true
                             })}
                             className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors inline-flex items-center"
-                            title="Delete / Cancel Trip"
+                            title="Permanently Delete Trip"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
