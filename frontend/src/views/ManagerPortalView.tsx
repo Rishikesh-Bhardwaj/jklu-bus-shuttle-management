@@ -492,7 +492,7 @@ export const ManagerPortalView: React.FC = () => {
         loadRoutesAndStops();
       } else if (itemType === 'trip') {
         res = await apiRequest(`/trips/${itemId}`, { method: 'DELETE' });
-        setBannerSuccess(res.message || `Trip #${itemId} permanently deleted.`);
+        setBannerSuccess(res.message || `Trip #${itemId} cancelled.`);
         loadTrips();
       }
       setDeleteConfirmModal(null);
@@ -1486,15 +1486,15 @@ export const ManagerPortalView: React.FC = () => {
                             type="button"
                             onClick={() => setDeleteConfirmModal({
                               isOpen: true,
-                              title: 'Permanently Delete Trip',
-                              message: `Are you sure you want to permanently delete trip #${t.trip_id} (${t.route_name})?`,
-                              details: 'Trips with passenger bookings cannot be deleted until those bookings are handled. A blocked deletion will not cancel the trip or modify passenger records.',
+                              title: 'Cancel Trip',
+                              message: `Are you sure you want to cancel trip #${t.trip_id} (${t.route_name})?`,
+                              details: 'All confirmed bookings will be cancelled and seat reservations released. Passenger booking and check-in history will be preserved. The trip will remain in the system with CANCELLED status.',
                               itemType: 'trip',
                               itemId: t.trip_id,
                               itemName: `Trip #${t.trip_id} (${t.route_name})`,
                             })}
                             className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors inline-flex items-center"
-                            title="Permanently Delete Trip"
+                            title="Cancel Trip"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
