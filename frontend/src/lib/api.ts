@@ -1,21 +1,27 @@
+
 /**
  * JKLU Bus Shuttle Management System - API Client
- * Configured with automatic CSRF synchronization and HTTP-only cookie support.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://jklu-bus-shuttle-api.onrender.com/api';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  'https://jklu-bus-shuttle-api.onrender.com/api';
 
-function getCookie(name: string): string | null {
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-  return match ? decodeURIComponent(match[2]) : null;
-}
+let csrfToken: string | null = null;
 
 export async function fetchCsrfToken(): Promise<string> {
   const res = await fetch(`${API_BASE_URL}/auth/csrf`, {
     credentials: 'include',
   });
+
+  if (!res.ok) {
+    throw new Error('Unable to obtain CSRF token.');
+  }
+
   const data = await res.json();
-  return data.csrfToken;
+  csrfToken = data.csrfToken;
+
+  return csrfToken!;
 }
 
 export async function apiRequest<T = any>(
@@ -23,17 +29,14 @@ export async function apiRequest<T = any>(
   options: RequestInit = {}
 ): Promise<T> {
   const headers = new Headers(options.headers || {});
-
-  // For state-changing methods, attach X-CSRF-Token header
   const method = (options.method || 'GET').toUpperCase();
+
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-    let csrfToken = getCookie('jklu_csrf_token');
     if (!csrfToken) {
-      csrfToken = await fetchCsrfToken();
+      await fetchCsrfToken();
     }
-    if (csrfToken) {
-      headers.set('X-CSRF-Token', csrfToken);
-    }
+
+    headers.set('X-CSRF-Token', csrfToken!);
   }
 
   if (options.body && !(options.body instanceof FormData)) {
@@ -47,15 +50,17 @@ export async function apiRequest<T = any>(
   });
 
   const contentType = response.headers.get('content-type');
-  let data: any = null;
-  if (contentType && contentType.includes('application/json')) {
-    data = await response.json();
-  } else {
-    data = await response.text();
-  }
+  const data =
+    contentType && contentType.includes('application/json')
+      ? await response.json()
+      : await response.text();
 
   if (!response.ok) {
-    const errorMsg = data?.error || data?.message || `Request failed with status ${response.status}`;
+    const errorMsg =
+      data?.error ||
+      data?.message ||
+      `Request failed with status ${response.status}`;
+
     const err = new Error(errorMsg);
     (err as any).status = response.status;
     (err as any).data = data;
@@ -64,4 +69,3 @@ export async function apiRequest<T = any>(
 
   return data as T;
 }
-
