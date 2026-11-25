@@ -4,7 +4,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { extractBaseUsername, getSslConfig, isTiDBServer } from '../src/config/dbSecurity.js';
 
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 /**
  * Step 1: Apply or verify alteration of the `users` table.
@@ -717,7 +717,7 @@ async function runMigrations(): Promise<void> {
     );
     const appliedSet = new Set(appliedRows.map((r: any) => r.migration_name));
 
-    const migrationsDir = path.resolve(__dirname, '../src/migrations');
+    const migrationsDir = path.resolve(process.cwd(), 'src/migrations');
     const files = fs
       .readdirSync(migrationsDir)
       .filter((file) => file.endsWith('.sql'))
