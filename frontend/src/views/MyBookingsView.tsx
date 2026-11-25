@@ -384,7 +384,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                           {isTripCancelled ? (
                             <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1 font-bold">
                               <XCircle className="w-3.5 h-3.5" />
-                              {b.trip_status === 'DELETED' ? 'Trip Deleted by Transport' : 'Trip Cancelled by Transport'}
+                              {b.trip_status === 'DELETED' ? 'Trip Deleted by Manager' : 'Trip Cancelled by Transport'}
                             </span>
                           ) : isBoarded ? (
                             <span className="text-emerald-600 flex items-center gap-1">
@@ -448,7 +448,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                 <div key={b.booking_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
                   <div className="min-w-0">
                     <p className="font-semibold text-xs text-neutral-800 dark:text-neutral-200">Booking #{b.booking_id} · {b.route_name}</p>
-                    <p className="text-[11px] text-neutral-500">{new Date(b.trip_date).toLocaleDateString()} · Seat {b.seat_number} · {b.trip_status === 'DELETED' ? 'Trip deleted by transport' : b.trip_status === 'CANCELLED' ? 'Trip cancelled by transport' : 'Booking cancelled'}</p>
+                    <p className="text-[11px] text-neutral-500">{new Date(b.trip_date).toLocaleDateString()} · Seat {b.seat_number} · {b.trip_status === 'DELETED' ? 'Trip deleted by manager' : b.trip_status === 'CANCELLED' ? 'Trip cancelled by transport' : 'Booking cancelled'}</p>
                   </div>
                   <button
                     onClick={() => handleRemoveCancelledPass(Number(b.booking_id))}
