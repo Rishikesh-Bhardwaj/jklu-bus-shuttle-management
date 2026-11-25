@@ -295,7 +295,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                   <span className={`font-mono text-[11px] px-2 py-0.5 rounded font-semibold ${
                     isTripCancelled ? 'bg-rose-950 text-rose-300' : 'bg-primary-800 text-primary-200'
                   }`}>
-                    #{b.booking_id}
+                    Booking #{b.booking_id}
                   </span>
                 </div>
 
@@ -327,6 +327,10 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
 
                   {/* Trip Details Grid */}
                   <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-100 dark:border-neutral-800 grid grid-cols-2 gap-3 font-mono text-[11px]">
+                    <div>
+                      <span className="text-[10px] text-neutral-400 uppercase block">Trip ID</span>
+                      <span className="font-bold text-neutral-800 dark:text-neutral-200">#{b.trip_id}</span>
+                    </div>
                     <div>
                       <span className="text-[10px] text-neutral-400 uppercase block">Departure</span>
                       <span className="font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1">
@@ -468,7 +472,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
               <h3 className="font-bold text-base text-neutral-900 dark:text-neutral-100">Digital Boarding Pass</h3>
               <button onClick={() => setSelectedPass(null)} className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white text-xl" aria-label="Close boarding pass">×</button>
             </div>
-            <p className="text-xs text-neutral-500">Booking #{selectedPass.booking.booking_id} · Seat {selectedPass.booking.seat_number}</p>
+            <p className="text-xs text-neutral-500">Booking #{selectedPass.booking.booking_id} · Trip #{selectedPass.booking.trip_id} · Seat {selectedPass.booking.seat_number}</p>
             <div className="mx-auto w-fit rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white p-3">
               <img
                 src={`https://quickchart.io/qr?size=220&text=${encodeURIComponent(selectedPass.boardingPass.qrPayload)}`}
