@@ -78,7 +78,8 @@ jobs:
         run: npm ci
       - name: Allow test database trigger creation
         working-directory: backend
-        run: node -e "const mysql = require('mysql2/promise'); (async () => { const c = await mysql.createConnection({ host: '127.0.0.1', user: 'root', password: 'root-password' }); await c.query('SET GLOBAL log_bin_trust_function_creators = 1'); await c.end(); })().catch((e) => { console.error(e); process.exit(1); });"
+        run: |
+          node -e "const mysql = require('mysql2/promise'); (async () => { const c = await mysql.createConnection({ host: '127.0.0.1', user: 'root', password: 'root-password' }); await c.query('SET GLOBAL log_bin_trust_function_creators = 1'); await c.end(); })().catch((e) => { console.error(e); process.exit(1); });"
       - name: Apply all migrations to a clean MySQL database
         working-directory: backend
         run: npm run db:migrate
