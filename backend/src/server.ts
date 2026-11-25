@@ -12,6 +12,7 @@ import tripRoutes from './routes/tripRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import checkInRoutes from './routes/checkInRoutes.js';
 import feedbackRoutes from './routes/feedbackRoutes.js';
+import resourceRoutes from './routes/resourceRoutes.js';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 dotenv.config({ path: path.resolve(process.cwd(), 'backend/.env') });
@@ -83,6 +84,7 @@ app.use('/api/trips', tripRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/check-ins', checkInRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/resources', resourceRoutes);
 
 // Global Error Handler
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
