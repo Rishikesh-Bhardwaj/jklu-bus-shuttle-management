@@ -30,6 +30,15 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   const [cancelReason, setCancelReason] = useState<string>('Personal schedule change');
   const [selectedPass, setSelectedPass] = useState<any | null>(null);
   const [loadingPassId, setLoadingPassId] = useState<number | null>(null);
+  const dismissedStorageKey = `jklu-hidden-cancelled-passes-${user?.userId ?? 'guest'}`;
+  const [dismissedCancelledIds, setDismissedCancelledIds] = useState<number[]>(() => {
+    try {
+      const saved = localStorage.getItem(`jklu-hidden-cancelled-passes-${user?.userId ?? 'guest'}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const fetchBookings = async () => {
     try {
@@ -68,6 +77,23 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   const activeBookings = bookings.filter(
     (booking) => booking.booking_status === 'CONFIRMED' && booking.trip_status !== 'CANCELLED'
   );
+  const cancelledBookings = bookings.filter(
+    (booking) =>
+      (booking.booking_status === 'CANCELLED' || booking.trip_status === 'CANCELLED') &&
+      !dismissedCancelledIds.includes(Number(booking.booking_id))
+  );
+
+  const handleRemoveCancelledPass = (bookingId: number) => {
+    setDismissedCancelledIds((current) => {
+      const next = [...new Set([...current, bookingId])];
+      try {
+        localStorage.setItem(dismissedStorageKey, JSON.stringify(next));
+      } catch {
+        setError('Could not save this display preference in your browser.');
+      }
+      return next;
+    });
+  };
 
   const handleOpenPass = async (booking: any) => {
     try {
@@ -120,7 +146,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
           <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
           <p className="text-xs text-neutral-500">Retrieving digital passes...</p>
         </div>
-      ) : activeBookings.length === 0 ? (
+      ) : activeBookings.length === 0 && cancelledBookings.length === 0 ? (
         <div className="p-12 text-center bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 text-neutral-500 dark:text-neutral-400 space-y-3">
           <Ticket className="w-12 h-12 text-neutral-300 dark:text-neutral-700 mx-auto" />
           <h3 className="font-bold text-sm text-neutral-800 dark:text-neutral-200">
@@ -137,7 +163,8 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-8">
+        {activeBookings.length > 0 && <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {activeBookings.map((b) => {
             const isTripCancelled = false;
             const isConfirmed = b.booking_status === 'CONFIRMED' && !isTripCancelled;
@@ -304,6 +331,31 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
               </div>
             );
           })}
+        </div>}
+        {cancelledBookings.length > 0 && (
+          <section className="space-y-3">
+            <div>
+              <h3 className="font-bold text-sm text-neutral-800 dark:text-neutral-200">Cancelled Passes</h3>
+              <p className="text-xs text-neutral-500">These passes are inactive. Removing one hides it from this browser only; the official booking history remains safely stored in the system.</p>
+            </div>
+            <div className="space-y-2">
+              {cancelledBookings.map((b) => (
+                <div key={b.booking_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-xs text-neutral-800 dark:text-neutral-200">Booking #{b.booking_id} · {b.route_name}</p>
+                    <p className="text-[11px] text-neutral-500">{new Date(b.trip_date).toLocaleDateString()} · Seat {b.seat_number} · {b.trip_status === 'CANCELLED' ? 'Trip cancelled by transport' : 'Booking cancelled'}</p>
+                  </div>
+                  <button
+                    onClick={() => handleRemoveCancelledPass(Number(b.booking_id))}
+                    className="shrink-0 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  >
+                    Remove from My Passes
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         </div>
       )}
 
