@@ -1903,7 +1903,7 @@ export const ManagerPortalView: React.FC = () => {
                 ) : (
                   <>
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Confirm Permanent Delete</span>
+                    <span>{deleteConfirmModal.itemType === 'trip' ? 'Confirm Trip Cancellation' : 'Confirm Permanent Delete'}</span>
                   </>
                 )}
               </button>
