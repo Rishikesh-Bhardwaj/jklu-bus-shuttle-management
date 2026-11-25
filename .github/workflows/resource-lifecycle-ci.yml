@@ -91,6 +91,19 @@ jobs:
           DB_MIGRATION_PASSWORD: migration-password
           DB_USER: app_user
           DB_PASSWORD: app-password
+      - name: Verify lifecycle migration safely resumes after partial application
+        working-directory: backend
+        run: |
+          node -e "const mysql = require('mysql2/promise'); (async () => { const c = await mysql.createConnection({ host: '127.0.0.1', user: 'migration_admin', password: 'migration-password', database: 'jklu_bus_shuttle' }); await c.query(\"DELETE FROM schema_migrations WHERE migration_name = '011_resource_lifecycle_status.sql'\"); await c.end(); })().catch((e) => { console.error(e); process.exit(1); });"
+          npm run db:migrate
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: jklu_bus_shuttle
+          DB_MIGRATION_USER: migration_admin
+          DB_MIGRATION_PASSWORD: migration-password
+          DB_USER: app_user
+          DB_PASSWORD: app-password
       - name: Verify migrated schema and empty operational tables
         working-directory: backend
         run: npm run db:verify
