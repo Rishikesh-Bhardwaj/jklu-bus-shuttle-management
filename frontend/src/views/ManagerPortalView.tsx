@@ -95,7 +95,7 @@ export const ManagerPortalView: React.FC = () => {
     isDeactivation?: boolean;
   } | null>(null);
   const [processingDelete, setProcessingDelete] = useState<boolean>(false);
-  const [deleteDependencies, setDeleteDependencies] = useState<{ message: string; trips: any[]; routes: any[] } | null>(null);
+  const [deleteDependencies, setDeleteDependencies] = useState<{ message: string; trips: any[]; routes: any[]; stops: any[]; bookings: any[] } | null>(null);
 
   // Bus Reactivation State
   const [retiredBusPrompt, setRetiredBusPrompt] = useState<{
@@ -531,8 +531,10 @@ export const ManagerPortalView: React.FC = () => {
       const dependencies = err.data?.dependencies || {};
       const trips = Array.isArray(dependencies.trips) ? dependencies.trips : [];
       const routes = Array.isArray(dependencies.routes) ? dependencies.routes : [];
-      if (trips.length || routes.length) {
-        setDeleteDependencies({ message: err.message || `Cannot delete ${itemName} until its dependencies are resolved.`, trips, routes });
+      const stops = Array.isArray(dependencies.stops) ? dependencies.stops : [];
+      const bookings = Array.isArray(dependencies.bookings) ? dependencies.bookings : [];
+      if (trips.length || routes.length || stops.length || bookings.length) {
+        setDeleteDependencies({ message: err.message || `Cannot delete ${itemName} until its dependencies are resolved.`, trips, routes, stops, bookings });
       } else {
         setBannerError(err.message || `Failed to delete ${itemName}.`);
       }
@@ -1976,7 +1978,9 @@ export const ManagerPortalView: React.FC = () => {
             <h3 className="font-bold text-base text-rose-700 dark:text-rose-300">Cannot delete this resource yet</h3>
             <p className="text-sm text-neutral-700 dark:text-neutral-300">{deleteDependencies.message}</p>
             {deleteDependencies.trips.length > 0 && <div className="space-y-1"><p className="text-xs font-semibold">Dependent trips (ID and status)</p><ul className="max-h-40 overflow-y-auto text-xs list-disc pl-5">{deleteDependencies.trips.map((trip: any) => <li key={trip.trip_id}>Trip #{trip.trip_id} — {trip.trip_status}</li>)}</ul></div>}
-            {deleteDependencies.routes.length > 0 && <div className="space-y-1"><p className="text-xs font-semibold">Routes still using this resource</p><ul className="max-h-32 overflow-y-auto text-xs list-disc pl-5">{deleteDependencies.routes.map((route: any) => <li key={route.route_id}>Route #{route.route_id} — {route.route_name}</li>)}</ul></div>}
+            {deleteDependencies.routes.length > 0 && <div className="space-y-1"><p className="text-xs font-semibold">Routes still using this resource</p><ul className="max-h-32 overflow-y-auto text-xs list-disc pl-5">{deleteDependencies.routes.map((route: any, index: number) => <li key={route.route_id ?? index}>Route #{route.route_id} — {route.route_name || route.direction || 'Route reference'}</li>)}</ul></div>}
+            {deleteDependencies.stops.length > 0 && <div className="space-y-1"><p className="text-xs font-semibold">Stop-sequence dependencies</p><ul className="max-h-32 overflow-y-auto text-xs list-disc pl-5">{deleteDependencies.stops.map((stop: any, index: number) => <li key={stop.route_stop_id ?? stop.stop_id ?? index}>Route stop #{stop.route_stop_id ?? '—'} · Stop #{stop.stop_id} — {stop.stop_name || 'Stop reference'} {stop.stop_order ? `(order ${stop.stop_order})` : ''}</li>)}</ul></div>}
+            {deleteDependencies.bookings.length > 0 && <div className="space-y-1"><p className="text-xs font-semibold">Booking dependencies</p><ul className="max-h-32 overflow-y-auto text-xs list-disc pl-5">{deleteDependencies.bookings.map((booking: any) => <li key={booking.booking_id}>Booking #{booking.booking_id} — Trip #{booking.trip_id} ({booking.booking_status})</li>)}</ul></div>}
             <p className="text-xs text-neutral-500">Resolve these records manually, then retry. Trips, bookings, check-ins, seats, and user accounts are not automatically deleted.</p>
             <div className="flex justify-end"><button type="button" onClick={() => setDeleteDependencies(null)} className="px-4 py-2 rounded-lg text-sm font-semibold bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Close</button></div>
           </div>
