@@ -151,6 +151,16 @@ export async function updateBus(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    const [activeTrips]: any = await pool.query(
+      `SELECT trip_id, trip_date, departure_time, trip_status FROM trips
+       WHERE bus_id = ? AND trip_status IN ('SCHEDULED','PUBLISHED')
+       ORDER BY trip_date, departure_time`,
+      [busId]
+    );
+    if (activeTrips.length) {
+      res.status(409).json({ error: 'Cannot change bus status while scheduled/published trips use it. Resolve these trips manually first.', dependencies: { trips: activeTrips } });
+      return;
+    }
     const [result]: any = await pool.query(
       `UPDATE buses SET status = ? WHERE bus_id = ?`,
       [status, busId]
@@ -319,6 +329,21 @@ export async function updateDriver(req: Request, res: Response): Promise<void> {
     const driverId = parseInt(req.params.id, 10);
     const { driverName, licenceNumber, phoneNumber, status } = req.body;
 
+    if (status) {
+      if (!['ACTIVE', 'INACTIVE'].includes(status)) {
+        res.status(400).json({ error: 'Driver status must be ACTIVE or INACTIVE.' }); return;
+      }
+      const [activeTrips]: any = await pool.query(
+        `SELECT trip_id, trip_date, departure_time, trip_status FROM trips
+         WHERE driver_id = ? AND trip_status IN ('SCHEDULED','PUBLISHED')
+         ORDER BY trip_date, departure_time`,
+        [driverId]
+      );
+      if (activeTrips.length) {
+        res.status(409).json({ error: 'Cannot change driver status while scheduled/published trips use this driver. Resolve these trips manually first.', dependencies: { trips: activeTrips } });
+        return;
+      }
+    }
     const [result]: any = await pool.query(
       `UPDATE drivers
        SET driver_name = COALESCE(?, driver_name),
