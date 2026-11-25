@@ -95,6 +95,7 @@ export const ManagerPortalView: React.FC = () => {
     isDeactivation?: boolean;
   } | null>(null);
   const [processingDelete, setProcessingDelete] = useState<boolean>(false);
+  const [deleteDependencies, setDeleteDependencies] = useState<{ message: string; trips: any[]; routes: any[] } | null>(null);
 
   // Bus Reactivation State
   const [retiredBusPrompt, setRetiredBusPrompt] = useState<{
@@ -488,7 +489,7 @@ export const ManagerPortalView: React.FC = () => {
       setBannerSuccess(result.message || `${label} status changed to ${nextStatus}.`);
       if (type === 'bus' || type === 'driver') loadFleet(); else loadRoutesAndStops();
     } catch (err: any) {
-      const trips = err.dependencies?.trips;
+      const trips = err.data?.dependencies?.trips || err.dependencies?.trips;
       const details = Array.isArray(trips) ? trips.map((trip: any) => `#${trip.trip_id} (${trip.trip_status})`).join(', ') : '';
       setBannerError((err.message || `Could not update ${label} status.`) + (details ? ` Dependent trips: ${details}.` : ''));
     }
@@ -527,7 +528,14 @@ export const ManagerPortalView: React.FC = () => {
       }
       setDeleteConfirmModal(null);
     } catch (err: any) {
-      setBannerError(err.message || `Failed to delete ${itemName}.`);
+      const dependencies = err.data?.dependencies || {};
+      const trips = Array.isArray(dependencies.trips) ? dependencies.trips : [];
+      const routes = Array.isArray(dependencies.routes) ? dependencies.routes : [];
+      if (trips.length || routes.length) {
+        setDeleteDependencies({ message: err.message || `Cannot delete ${itemName} until its dependencies are resolved.`, trips, routes });
+      } else {
+        setBannerError(err.message || `Failed to delete ${itemName}.`);
+      }
     } finally {
       setProcessingDelete(false);
     }
@@ -1962,6 +1970,18 @@ export const ManagerPortalView: React.FC = () => {
         </div>
       )}
       {/* Delete / Deactivate Confirmation Dialog Modal */}
+      {deleteDependencies && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-rose-200 dark:border-rose-900 max-w-lg w-full p-6 space-y-4 shadow-2xl">
+            <h3 className="font-bold text-base text-rose-700 dark:text-rose-300">Cannot delete this resource yet</h3>
+            <p className="text-sm text-neutral-700 dark:text-neutral-300">{deleteDependencies.message}</p>
+            {deleteDependencies.trips.length > 0 && <div className="space-y-1"><p className="text-xs font-semibold">Dependent trips (ID and status)</p><ul className="max-h-40 overflow-y-auto text-xs list-disc pl-5">{deleteDependencies.trips.map((trip: any) => <li key={trip.trip_id}>Trip #{trip.trip_id} — {trip.trip_status}</li>)}</ul></div>}
+            {deleteDependencies.routes.length > 0 && <div className="space-y-1"><p className="text-xs font-semibold">Routes still using this resource</p><ul className="max-h-32 overflow-y-auto text-xs list-disc pl-5">{deleteDependencies.routes.map((route: any) => <li key={route.route_id}>Route #{route.route_id} — {route.route_name}</li>)}</ul></div>}
+            <p className="text-xs text-neutral-500">Resolve these records manually, then retry. Trips, bookings, check-ins, seats, and user accounts are not automatically deleted.</p>
+            <div className="flex justify-end"><button type="button" onClick={() => setDeleteDependencies(null)} className="px-4 py-2 rounded-lg text-sm font-semibold bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Close</button></div>
+          </div>
+        </div>
+      )}
       {deleteConfirmModal && deleteConfirmModal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 max-w-md w-full p-6 space-y-4">
