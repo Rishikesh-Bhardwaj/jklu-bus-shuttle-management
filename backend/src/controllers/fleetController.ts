@@ -180,12 +180,17 @@ export async function deleteBus(req: Request, res: Response): Promise<void> {
   }
 
   const connection = await pool.getConnection();
+  let transactionStarted = false;
   try {
+    await connection.beginTransaction();
+    transactionStarted = true;
     const [buses]: any = await connection.query(
-      'SELECT bus_id, bus_no FROM buses WHERE bus_id = ?',
+      'SELECT bus_id, bus_no FROM buses WHERE bus_id = ? FOR UPDATE',
       [busId]
     );
     if (buses.length === 0) {
+      await connection.rollback();
+      transactionStarted = false;
       res.status(404).json({ error: 'Bus not found.' });
       return;
     }
@@ -206,6 +211,8 @@ export async function deleteBus(req: Request, res: Response): Promise<void> {
     const tripCount = Number(tripRows[0]?.count || 0);
     const bookingCount = Number(bookingRows[0]?.count || 0);
     if (tripCount > 0 || bookingCount > 0) {
+      await connection.rollback();
+      transactionStarted = false;
       res.status(409).json({
         error: `Cannot permanently delete bus "${bus.bus_no}": it is referenced by ${tripCount} trip(s) and ${bookingCount} booking(s). Reassign or resolve those records first. No data was changed.`,
         dependencies: { trips: tripCount, bookings: bookingCount },
@@ -213,7 +220,6 @@ export async function deleteBus(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    await connection.beginTransaction();
     await connection.query('DELETE FROM seats WHERE bus_id = ?', [busId]);
     const [deleteResult]: any = await connection.query(
       'DELETE FROM buses WHERE bus_id = ?',
@@ -223,6 +229,7 @@ export async function deleteBus(req: Request, res: Response): Promise<void> {
       throw new Error('Bus was not deleted; no matching record remained.');
     }
     await connection.commit();
+    transactionStarted = false;
 
     res.json({
       message: `Bus "${bus.bus_no}" and its seat inventory have been permanently deleted.`,
@@ -230,7 +237,9 @@ export async function deleteBus(req: Request, res: Response): Promise<void> {
       busId,
     });
   } catch (error: any) {
-    try { await connection.rollback(); } catch { /* transaction may not have started */ }
+    if (transactionStarted) {
+      try { await connection.rollback(); } catch { /* preserve original error */ }
+    }
     const isForeignKey = error.code === 'ER_ROW_IS_REFERENCED_2' || error.errno === 1451;
     console.error('[FLEET_BUS_DELETE_ERROR]', error);
     res.status(isForeignKey ? 409 : 500).json({
