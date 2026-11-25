@@ -31,14 +31,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   const [selectedPass, setSelectedPass] = useState<any | null>(null);
   const [loadingPassId, setLoadingPassId] = useState<number | null>(null);
   const dismissedStorageKey = `jklu-hidden-cancelled-passes-${user?.userId ?? 'guest'}`;
-  const [dismissedCancelledIds, setDismissedCancelledIds] = useState<number[]>(() => {
-    try {
-      const saved = localStorage.getItem(`jklu-hidden-cancelled-passes-${user?.userId ?? 'guest'}`);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [dismissedCancelledIds, setDismissedCancelledIds] = useState<number[]>([]);
 
   const fetchBookings = async () => {
     try {
@@ -52,6 +45,15 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(dismissedStorageKey);
+      setDismissedCancelledIds(saved ? JSON.parse(saved) : []);
+    } catch {
+      setDismissedCancelledIds([]);
+    }
+  }, [dismissedStorageKey]);
 
   useEffect(() => {
     fetchBookings();
