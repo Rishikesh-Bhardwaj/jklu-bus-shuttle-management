@@ -206,14 +206,47 @@ export async function createTrip(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Verify route and direction match
+    // Refuse to schedule trips with inactive resources.
     const [routeCheck]: any = await pool.query(
-      `SELECT route_id, direction FROM routes WHERE route_id = ? AND direction = ?`,
+      `SELECT r.route_id, r.direction, r.status AS route_status,
+              c.status AS corridor_status
+       FROM routes r JOIN route_corridors c ON c.corridor_id = r.corridor_id
+       WHERE r.route_id = ? AND r.direction = ?`,
       [routeId, direction]
     );
     if (routeCheck.length === 0) {
-      res.status(400).json({
-        error: `Route ${routeId} does not match direction ${direction}.`,
+      res.status(400).json({ error: `Route ${routeId} does not match direction ${direction}.` });
+      return;
+    }
+    if (routeCheck[0].route_status !== 'ACTIVE' || routeCheck[0].corridor_status !== 'ACTIVE') {
+      res.status(409).json({ error: 'Cannot schedule a trip on an inactive route or corridor.' });
+      return;
+    }
+
+    const [busCheck]: any = await pool.query('SELECT status FROM buses WHERE bus_id = ?', [busId]);
+    if (!busCheck.length || busCheck[0].status !== 'ACTIVE') {
+      res.status(409).json({ error: 'Cannot schedule a trip with an inactive or unavailable bus.' });
+      return;
+    }
+
+    if (driverId) {
+      const [driverCheck]: any = await pool.query('SELECT status FROM drivers WHERE driver_id = ?', [driverId]);
+      if (!driverCheck.length || driverCheck[0].status !== 'ACTIVE') {
+        res.status(409).json({ error: 'Cannot schedule a trip with an inactive or unavailable driver.' });
+        return;
+      }
+    }
+
+    const [inactiveStops]: any = await pool.query(
+      `SELECT s.stop_id, s.stop_name
+       FROM route_stops rs JOIN stops s ON s.stop_id = rs.stop_id
+       WHERE rs.route_id = ? AND s.status <> 'ACTIVE'`,
+      [routeId]
+    );
+    if (inactiveStops.length) {
+      res.status(409).json({
+        error: 'Cannot schedule a trip because this route contains inactive stops.',
+        dependencies: { stops: inactiveStops },
       });
       return;
     }
