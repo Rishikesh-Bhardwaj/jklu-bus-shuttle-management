@@ -225,7 +225,7 @@ export async function getMyBookings(req: Request, res: Response): Promise<void> 
     const userId = req.user!.userId;
 
     const [rows]: any = await pool.query(
-      `SELECT b.booking_id, b.user_id, b.trip_id, b.booking_status, b.booking_time,
+      `SELECT b.booking_id, b.user_id, t.trip_id AS trip_id, b.booking_status, b.booking_time,
               b.cancelled_at, b.cancellation_reason,
               t.trip_date, t.departure_time, t.estimated_arrival_time, t.direction, t.trip_category, t.trip_status,
               r.route_name, r.origin, r.destination,
@@ -248,7 +248,7 @@ export async function getMyBookings(req: Request, res: Response): Promise<void> 
       [userId]
     );
 
-    res.json({ bookings: rows });
+    res.json({ bookings: rows.map((row: any) => ({ ...row, trip_id: Number(row.trip_id) })) });
   } catch (error: any) {
     console.error('[MY_BOOKINGS_ERROR]', error);
     res.status(500).json({ error: 'Failed to retrieve your bookings.' });
@@ -266,7 +266,7 @@ export async function getBookingById(req: Request, res: Response): Promise<void>
     const userRole = req.user!.role;
 
     const [rows]: any = await pool.query(
-      `SELECT b.booking_id, b.user_id, b.trip_id, b.booking_status, b.booking_time,
+      `SELECT b.booking_id, b.user_id, t.trip_id AS trip_id, b.booking_status, b.booking_time,
               b.cancelled_at, b.cancellation_reason,
               u.full_name AS passenger_name, u.email AS passenger_email, u.phone_number AS passenger_phone,
               t.trip_date, t.departure_time, t.estimated_arrival_time, t.direction, t.trip_category, t.trip_status,
@@ -295,7 +295,7 @@ export async function getBookingById(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const booking = rows[0];
+    const booking = { ...rows[0], trip_id: Number(rows[0].trip_id) };
 
     if (userRole !== 'MANAGER' && booking.user_id !== userId) {
       res.status(403).json({ error: 'You are not authorized to view this booking.' });
