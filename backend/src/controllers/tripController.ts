@@ -266,7 +266,7 @@ export async function createTrip(req: Request, res: Response): Promise<void> {
     }
 
     const [routeStops]: any = await connection.query(
-      'SELECT stop_id FROM route_stops WHERE route_id = ? ORDER BY stop_id ASC',
+      'SELECT stop_id FROM route_stops WHERE route_id = ? ORDER BY stop_id ASC FOR UPDATE',
       [routeId]
     );
     const stopIds = routeStops.map((row: any) => Number(row.stop_id)).sort((a: number, b: number) => a - b);
@@ -393,7 +393,7 @@ export async function updateTrip(req: Request, res: Response): Promise<void> {
         }
       }
       const [routeStops]: any = await connection.query(
-        'SELECT stop_id FROM route_stops WHERE route_id = ? ORDER BY stop_id ASC',
+        'SELECT stop_id FROM route_stops WHERE route_id = ? ORDER BY stop_id ASC FOR UPDATE',
         [existing.route_id]
       );
       const stopIds = routeStops.map((row: any) => Number(row.stop_id)).sort((a: number, b: number) => a - b);
