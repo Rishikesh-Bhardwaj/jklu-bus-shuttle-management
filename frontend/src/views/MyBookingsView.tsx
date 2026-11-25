@@ -32,6 +32,13 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   const [loadingPassId, setLoadingPassId] = useState<number | null>(null);
   const dismissedStorageKey = `jklu-hidden-cancelled-passes-${user?.userId ?? 'guest'}`;
   const [dismissedCancelledIds, setDismissedCancelledIds] = useState<number[]>([]);
+  const [scannerOpen, setScannerOpen] = useState<boolean>(false);
+  const [scannerBusy, setScannerBusy] = useState<boolean>(false);
+  const [scannerMessage, setScannerMessage] = useState<string | null>(null);
+  const scannerVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const scannerStreamRef = React.useRef<MediaStream | null>(null);
+  const scannerTimerRef = React.useRef<number | null>(null);
+  const scannerProcessingRef = React.useRef<boolean>(false);
 
   const fetchBookings = async () => {
     try {
@@ -57,6 +64,11 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
 
   useEffect(() => {
     fetchBookings();
+  }, []);
+
+  useEffect(() => () => {
+    if (scannerTimerRef.current !== null) window.clearInterval(scannerTimerRef.current);
+    scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
   const handleCancelBooking = async () => {
@@ -97,6 +109,73 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
     });
   };
 
+  const stopBusQrScanner = () => {
+    if (scannerTimerRef.current !== null) {
+      window.clearInterval(scannerTimerRef.current);
+      scannerTimerRef.current = null;
+    }
+    scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
+    scannerStreamRef.current = null;
+    if (scannerVideoRef.current) scannerVideoRef.current.srcObject = null;
+    setScannerOpen(false);
+    setScannerBusy(false);
+  };
+
+  const startBusQrScanner = async () => {
+    setScannerMessage(null);
+    const Detector = (window as any).BarcodeDetector;
+    if (!Detector) {
+      setScannerMessage('QR scanning is not supported by this browser. Please use an updated Chrome browser on your phone.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScannerMessage('Camera access requires HTTPS and browser permission.');
+      return;
+    }
+
+    try {
+      setScannerBusy(true);
+      setScannerOpen(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      scannerStreamRef.current = stream;
+      const video = scannerVideoRef.current;
+      if (!video) throw new Error('Camera preview could not be initialized.');
+      video.srcObject = stream;
+      await video.play();
+
+      const detector = new Detector({ formats: ['qr_code'] });
+      scannerTimerRef.current = window.setInterval(async () => {
+        if (scannerProcessingRef.current || !video.videoWidth) return;
+        try {
+          const codes = await detector.detect(video);
+          const token = codes?.[0]?.rawValue;
+          if (!token || scannerProcessingRef.current) return;
+          scannerProcessingRef.current = true;
+          stopBusQrScanner();
+          const result = await apiRequest('/check-ins/scan', {
+            method: 'POST',
+            body: JSON.stringify({ token }),
+          });
+          setScannerMessage(result.message || 'Boarding confirmed!');
+          await fetchBookings();
+        } catch (err: any) {
+          setScannerMessage(err.message || 'Unable to verify this bus QR code.');
+        } finally {
+          scannerProcessingRef.current = false;
+        }
+      }, 500);
+      setScannerBusy(false);
+    } catch (err: any) {
+      stopBusQrScanner();
+      setScannerMessage(err.message || 'Unable to access the camera. Check browser camera permissions.');
+    } finally {
+      setScannerBusy(false);
+    }
+  };
+
   const handleOpenPass = async (booking: any) => {
     try {
       setLoadingPassId(booking.booking_id);
@@ -135,6 +214,26 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
           <span>Book Another Shuttle</span>
         </button>
       </div>
+
+      <section className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-950/20 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-sm text-neutral-900 dark:text-neutral-100">Automatic Bus Check-In</h3>
+            <p className="text-xs text-neutral-600 dark:text-neutral-400">When you are at the shuttle, scan the temporary QR displayed by the driver. Your confirmed booking will be checked in automatically.</p>
+          </div>
+          {!scannerOpen ? (
+            <button type="button" onClick={startBusQrScanner} disabled={scannerBusy} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold">
+              {scannerBusy ? 'Starting camera…' : 'Scan Bus QR'}
+            </button>
+          ) : (
+            <button type="button" onClick={stopBusQrScanner} className="px-4 py-2 rounded-lg bg-neutral-700 hover:bg-neutral-800 text-white text-xs font-semibold">Stop Camera</button>
+          )}
+        </div>
+        {scannerOpen && (
+          <video ref={scannerVideoRef} autoPlay muted playsInline className="w-full max-w-sm mx-auto rounded-xl bg-black aspect-video object-cover" />
+        )}
+        {scannerMessage && <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{scannerMessage}</p>}
+      </section>
 
       {error && (
         <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
