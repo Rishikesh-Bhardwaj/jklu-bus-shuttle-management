@@ -6,7 +6,7 @@ import { pool } from '../config/db.js';
 export async function listCorridors(req: Request, res: Response): Promise<void> {
   try {
     const [rows]: any = await pool.query(
-      `SELECT corridor_id, corridor_name, description, created_at FROM route_corridors ORDER BY corridor_name ASC`
+      `SELECT corridor_id, corridor_name, description, status, created_at FROM route_corridors ORDER BY corridor_name ASC`
     );
     res.json({ corridors: rows });
   } catch (error: any) {
@@ -47,7 +47,7 @@ export async function createCorridor(req: Request, res: Response): Promise<void>
 export async function listStops(req: Request, res: Response): Promise<void> {
   try {
     const [rows]: any = await pool.query(
-      `SELECT stop_id, stop_name, created_at FROM stops ORDER BY stop_name ASC`
+      `SELECT stop_id, stop_name, status, created_at FROM stops ORDER BY stop_name ASC`
     );
     res.json({ stops: rows });
   } catch (error: any) {
@@ -89,7 +89,7 @@ export async function listRoutes(req: Request, res: Response): Promise<void> {
   try {
     const [routes]: any = await pool.query(
       `SELECT r.route_id, r.corridor_id, c.corridor_name, r.paired_return_route_id,
-              r.route_name, r.origin, r.destination, r.direction, r.created_at,
+              r.route_name, r.origin, r.destination, r.direction, r.status, r.created_at,
               pr.route_name AS paired_route_name
        FROM routes r
        JOIN route_corridors c ON r.corridor_id = c.corridor_id

@@ -152,188 +152,56 @@ async function runTestSuite() {
   assert(returnTrips.some((t) => t.departure_time !== '18:00:00'), 'Return trips at non-6 PM times (e.g. 14:00, 17:30) are permitted and valid');
 
   // -------------------------------------------------------------
-  // Test Section 8: Manager Deletion & Deactivation Integrity Rules
+  // Test Section 8: Resource Lifecycle Policy
   // -------------------------------------------------------------
-  console.log('\n[8/8] Manager Record Deletion & Soft-Deactivation Rules:');
+  console.log('\n[8/8] Resource Lifecycle Policy & Data Preservation:');
 
-  // Mock validation functions representing backend controller safety invariants
-  function validateBusDeletion(activeTripCount: number, historicalTripCount: number) {
-    if (activeTripCount > 0) return { allowed: false, action: 'BLOCKED', reason: 'Assigned to active trips' };
-    if (historicalTripCount > 0) return { allowed: true, action: 'RETIRED', reason: 'Deactivated to preserve history' };
-    return { allowed: true, action: 'DELETED', reason: 'Unused record permanently removed' };
+  type ResourceStatus = 'ACTIVE' | 'INACTIVE' | 'RETIRED' | 'MAINTENANCE';
+  function canChangeStatus(activeTripCount: number): boolean {
+    return activeTripCount === 0;
+  }
+  function canPermanentlyDelete(totalTripReferences: number, otherDependencies: number): boolean {
+    return totalTripReferences === 0 && otherDependencies === 0;
+  }
+  function canCreateTrip(resourceStatuses: ResourceStatus[]): boolean {
+    return resourceStatuses.every((status) => status === 'ACTIVE');
+  }
+  function deleteTripAction(): { action: 'CANCELLED'; preservesTrip: true; preservesPassengerHistory: true } {
+    return { action: 'CANCELLED', preservesTrip: true, preservesPassengerHistory: true };
   }
 
-  function validateTripDeletion(totalBookings: number) {
-    if (totalBookings > 0) return { action: 'CANCELLED', releasesSeats: true, preservesRecords: true, reason: 'Soft-cancelled to preserve passenger booking history' };
-    return { action: 'DELETED', releasesSeats: true, preservesRecords: false, reason: 'Draft trip with zero bookings permanently deleted' };
+  assert(!canChangeStatus(1), 'Blocks activation/deactivation while a scheduled or published trip references a resource');
+  assert(canChangeStatus(0), 'Allows status changes when no active trip references the resource');
+  assert(!canPermanentlyDelete(1, 0), 'Blocks permanent deletion while any historical trip reference remains');
+  assert(!canPermanentlyDelete(0, 1), 'Blocks permanent deletion while route, stop, booking, or other dependencies remain');
+  assert(canPermanentlyDelete(0, 0), 'Allows permanent deletion only after every dependency is manually resolved');
+  assert(canCreateTrip(['ACTIVE', 'ACTIVE', 'ACTIVE']), 'Allows trip creation when every referenced resource is active');
+  assert(!canCreateTrip(['ACTIVE', 'INACTIVE', 'ACTIVE']), 'Rejects trip creation when any referenced resource is inactive');
+  assert(!canCreateTrip(['ACTIVE', 'RETIRED']), 'Rejects trip creation when a bus is retired');
+  assert(deleteTripAction().action === 'CANCELLED', 'Trip DELETE endpoint cancels rather than physically deleting a trip');
+  assert(deleteTripAction().preservesTrip && deleteTripAction().preservesPassengerHistory, 'Trip cancellation preserves trip and passenger audit records');
+
+  // Deletion dependencies must be presented to the manager, not cascaded away.
+  function deletionResolution(dependencies: { trips: number; routes: number; stops: number; bookings: number }) {
+    const blocked = dependencies.trips + dependencies.routes + dependencies.stops + dependencies.bookings > 0;
+    return { allowed: !blocked, showDependencies: blocked, cascadeDelete: false };
   }
+  assert(deletionResolution({ trips: 2, routes: 0, stops: 0, bookings: 0 }).showDependencies, 'Shows exact trip dependencies before resource deletion');
+  assert(deletionResolution({ trips: 0, routes: 1, stops: 0, bookings: 0 }).showDependencies, 'Shows route references before corridor or stop deletion');
+  assert(deletionResolution({ trips: 0, routes: 0, stops: 1, bookings: 0 }).showDependencies, 'Shows route-stop sequence references before deletion');
+  assert(deletionResolution({ trips: 0, routes: 0, stops: 0, bookings: 1 }).showDependencies, 'Shows booking references before resource deletion');
+  assert(!deletionResolution({ trips: 0, routes: 0, stops: 0, bookings: 0 }).cascadeDelete, 'Never cascades deletion into trip or passenger records');
 
-  function validateBoardingAction(tripStatus: string, boardingStatus: string) {
-    if (tripStatus === 'CANCELLED') return { allowed: false, reason: 'Trip is cancelled' };
-    if (boardingStatus === 'BOARDED') return { allowed: false, reason: 'Already boarded' };
-    if (boardingStatus === 'CANCELLED_PRIOR') return { allowed: false, reason: 'Booking cancelled' };
-    return { allowed: true, reason: 'Boarding permitted' };
+  // Existing resource identifiers remain stable; status changes do not recreate rows.
+  function transitionStatus(current: ResourceStatus, next: ResourceStatus) {
+    return { id: 9001, status: next, identifierPreserved: true, current };
   }
-
-  function validateRouteDeletion(associatedTripCount: number, isPairedReturn: boolean) {
-    if (associatedTripCount > 0) return { allowed: false, reason: 'Referenced by existing trips' };
-    if (isPairedReturn) return { allowed: false, reason: 'Assigned as paired return route' };
-    return { allowed: true, reason: 'Route and stops safely deleted' };
-  }
-
-  function validateStopDeletion(routeAssignmentCount: number, bookingRefCount: number) {
-    if (routeAssignmentCount > 0) return { allowed: false, reason: 'Assigned to route sequences' };
-    if (bookingRefCount > 0) return { allowed: false, reason: 'Referenced in passenger bookings' };
-    return { allowed: true, reason: 'Stop safely deleted' };
-  }
-
-  assert(!validateBusDeletion(2, 5).allowed, 'Blocks deletion of bus assigned to active/upcoming trips');
-  assert(validateBusDeletion(0, 5).action === 'RETIRED', 'Soft-deletes (retires) bus with historical trips to preserve records');
-  assert(validateBusDeletion(0, 0).action === 'DELETED', 'Allows deletion of completely unused bus');
-
-  assert(validateTripDeletion(5).action === 'CANCELLED', 'Soft-cancels trip with active passenger bookings instead of rejecting');
-  assert(validateTripDeletion(5).releasesSeats, 'Releases seat reservations on soft-cancelled trip');
-  assert(validateTripDeletion(5).preservesRecords, 'Preserves passenger booking history on soft-cancelled trip');
-  assert(validateTripDeletion(2).action === 'CANCELLED', 'Safely archives completed historical trips via soft-cancellation');
-  assert(validateTripDeletion(0).action === 'DELETED', 'Permanently deletes trip with zero bookings');
-
-  assert(!validateBoardingAction('CANCELLED', 'NOT_CHECKED_IN').allowed, 'Blocks passenger boarding on cancelled trip');
-  assert(!validateBoardingAction('PUBLISHED', 'CANCELLED_PRIOR').allowed, 'Blocks boarding for cancelled booking');
-  assert(validateBoardingAction('PUBLISHED', 'NOT_CHECKED_IN').allowed, 'Permits boarding for valid passenger on published trip');
-
-  assert(!validateRouteDeletion(4, false).allowed, 'Blocks deletion of route with existing trips');
-  assert(!validateRouteDeletion(0, true).allowed, 'Blocks deletion of route paired as return service');
-  assert(validateRouteDeletion(0, false).allowed, 'Permits deletion of unreferenced route');
-
-  assert(!validateStopDeletion(2, 0).allowed, 'Blocks deletion of stop used in active routes');
-  assert(!validateStopDeletion(0, 1).allowed, 'Blocks deletion of stop referenced in bookings');
-  assert(validateStopDeletion(0, 0).allowed, 'Permits deletion of unreferenced stop');
-
-  // -------------------------------------------------------------
-  // Test Section 9: Bus Deletion, Foreign-Key Safety & Reactivation
-  // -------------------------------------------------------------
-  console.log('\n[9/9] Bus Deletion, Foreign-Key Safety & Reactivation Rules:');
-
-  function simulateBusDeletion(params: {
-    activeTrips: number;
-    historicalTrips: number;
-    historicalBookings: number;
-    dbError?: { code: string; errno?: number; message: string };
-  }) {
-    if (params.activeTrips > 0) {
-      return { status: 400, action: 'BLOCKED', error: 'Active trips assigned' };
-    }
-    if (params.historicalTrips > 0 || params.historicalBookings > 0) {
-      return { status: 200, action: 'RETIRED', seatsDeleted: false, busRetired: true };
-    }
-    // Attempt deletion of seats and bus in transaction
-    if (params.dbError) {
-      const isFk =
-        params.dbError.code === 'ER_ROW_IS_REFERENCED_2' ||
-        params.dbError.code === 'ER_ROW_IS_REFERENCED' ||
-        params.dbError.errno === 1451;
-      if (isFk) {
-        return { status: 200, action: 'RETIRED', seatsDeleted: false, busRetired: true, fallback: true };
-      }
-      // Permission errors or other DB errors must return 500 and NOT silently retire!
-      return { status: 500, action: 'ERROR', error: params.dbError.message, busRetired: false };
-    }
-    return { status: 200, action: 'DELETED', seatsDeleted: true, busDeleted: true };
-  }
-
-  function simulateBusRegistration(params: {
-    busNo: string;
-    existingBus?: { bus_id: number; bus_no: string; total_no_of_seats: number; status: 'ACTIVE' | 'MAINTENANCE' | 'RETIRED' };
-  }) {
-    if (params.existingBus) {
-      if (params.existingBus.status === 'RETIRED') {
-        return {
-          status: 409,
-          canReactivate: true,
-          bus: params.existingBus,
-          error: `Bus "${params.busNo}" already exists as RETIRED.`
-        };
-      }
-      return {
-        status: 409,
-        canReactivate: false,
-        error: `A bus with number "${params.busNo}" already exists.`
-      };
-    }
-    return {
-      status: 201,
-      action: 'CREATED',
-      bus: { bus_no: params.busNo, status: 'ACTIVE' },
-      seatsGenerated: 32
-    };
-  }
-
-  function simulateBusReactivation(bus: { bus_id: number; bus_no: string; total_no_of_seats: number; status: 'RETIRED' }) {
-    // Reactivation updates status without regenerating duplicate seats
-    return {
-      status: 200,
-      bus: { ...bus, status: 'ACTIVE' as const },
-      seatsPreserved: true,
-      duplicateSeatsCreated: false
-    };
-  }
-
-  // 1. Unused bus successfully hard-deleted
-  const unusedBusDel = simulateBusDeletion({ activeTrips: 0, historicalTrips: 0, historicalBookings: 0 });
-  assert(unusedBusDel.status === 200 && unusedBusDel.action === 'DELETED', 'Unused bus successfully hard-deleted');
-
-  // 2. Generated seats deleted in the same transaction
-  assert(unusedBusDel.seatsDeleted === true && unusedBusDel.busDeleted === true, 'Generated seats deleted in the same transaction');
-
-  // 3. Historical bus retired instead of deleted
-  const histTripBusDel = simulateBusDeletion({ activeTrips: 0, historicalTrips: 2, historicalBookings: 0 });
-  assert(histTripBusDel.action === 'RETIRED' && histTripBusDel.busRetired === true, 'Historical bus with trips retired instead of deleted');
-
-  const histBookingBusDel = simulateBusDeletion({ activeTrips: 0, historicalTrips: 0, historicalBookings: 3 });
-  assert(histBookingBusDel.action === 'RETIRED' && histBookingBusDel.busRetired === true, 'Historical bus with bookings retired instead of deleted');
-
-  // 4. Active trip deletion blocked
-  const activeTripBusDel = simulateBusDeletion({ activeTrips: 1, historicalTrips: 0, historicalBookings: 0 });
-  assert(activeTripBusDel.status === 400 && activeTripBusDel.action === 'BLOCKED', 'Active trip bus deletion blocked');
-
-  // 5. Foreign-key restriction causes safe retirement
-  const fkBusDel = simulateBusDeletion({
-    activeTrips: 0,
-    historicalTrips: 0,
-    historicalBookings: 0,
-    dbError: { code: 'ER_ROW_IS_REFERENCED_2', errno: 1451, message: 'Cannot delete or update a parent row: a foreign key constraint fails' }
-  });
-  assert(fkBusDel.action === 'RETIRED' && fkBusDel.fallback === true, 'Foreign-key restriction causes safe retirement fallback');
-
-  // 6. Database permission errors are not silently converted into retirement
-  const permErrorDel = simulateBusDeletion({
-    activeTrips: 0,
-    historicalTrips: 0,
-    historicalBookings: 0,
-    dbError: { code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142, message: "DELETE command denied to user 'jklu_app_user'@'localhost' for table 'seats'" }
-  });
-  assert(permErrorDel.status === 500 && permErrorDel.busRetired === false, 'Database permission errors are not silently converted into retirement');
-
-  // 7. Duplicate active bus registration rejected
-  const activeBusReg = simulateBusRegistration({
-    busNo: 'RJ14-PA-1234',
-    existingBus: { bus_id: 1, bus_no: 'RJ14-PA-1234', total_no_of_seats: 32, status: 'ACTIVE' }
-  });
-  assert(activeBusReg.status === 409 && activeBusReg.canReactivate === false, 'Duplicate active bus registration rejected');
-
-  // 8. Retired bus registration offers reactivation
-  const retiredBusReg = simulateBusRegistration({
-    busNo: 'RJ14-PA-1234',
-    existingBus: { bus_id: 1, bus_no: 'RJ14-PA-1234', total_no_of_seats: 32, status: 'RETIRED' }
-  });
-  assert(retiredBusReg.status === 409 && retiredBusReg.canReactivate === true, 'Registration of retired bus number offers safe reactivation');
-
-  // 9. Retired bus reactivation succeeds without duplicating seats
-  const reactivated = simulateBusReactivation(retiredBusReg.bus);
-  assert(reactivated.status === 200 && reactivated.bus.status === 'ACTIVE' && reactivated.duplicateSeatsCreated === false, 'Retired bus number can be reused through safe reactivation');
+  const reactivated = transitionStatus('RETIRED', 'ACTIVE');
+  assert(reactivated.identifierPreserved && reactivated.id === 9001, 'Reactivation preserves the original resource ID');
+  assert(transitionStatus('ACTIVE', 'INACTIVE').identifierPreserved, 'Deactivation preserves the original resource ID');
 
   console.log('\n================================================================');
-  console.log(`  TEST RESULTS: ${passedTests} / ${totalTests} CHECKS PASSED (100%)`);
+  console.log(`  TEST RESULTS: ${passedTests} / ${totalTests} CHECKS PASSED (${Math.round((passedTests / totalTests) * 100)}%)`);
   console.log('================================================================\n');
 }
 

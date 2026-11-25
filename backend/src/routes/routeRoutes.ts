@@ -11,6 +11,7 @@ import {
   createRoute,
   deleteRoute,
 } from '../controllers/routeController.js';
+import { deleteResource } from '../controllers/resourceLifecycleController.js';
 import { authenticate, requireRole, validateCsrf } from '../middleware/auth.js';
 
 const router = Router();
@@ -20,18 +21,18 @@ router.use(authenticate);
 // Corridors
 router.get('/corridors', listCorridors);
 router.post('/corridors', requireRole('MANAGER'), validateCsrf, createCorridor);
-router.delete('/corridors/:id', requireRole('MANAGER'), validateCsrf, deleteCorridor);
+router.delete('/corridors/:id', requireRole('MANAGER'), validateCsrf, (req, res) => { req.params.type = 'corridor'; return deleteResource(req, res); });
 
 // Stops
 router.get('/stops', listStops);
 router.post('/stops', requireRole('MANAGER'), validateCsrf, createStop);
-router.delete('/stops/:id', requireRole('MANAGER'), validateCsrf, deleteStop);
+router.delete('/stops/:id', requireRole('MANAGER'), validateCsrf, (req, res) => { req.params.type = 'stop'; return deleteResource(req, res); });
 
 // Routes
 router.get('/', listRoutes);
 router.get('/:id', getRouteById);
 router.post('/', requireRole('MANAGER'), validateCsrf, createRoute);
-router.delete('/:id', requireRole('MANAGER'), validateCsrf, deleteRoute);
+router.delete('/:id', requireRole('MANAGER'), validateCsrf, (req, res) => { req.params.type = 'route'; return deleteResource(req, res); });
 
 export default router;
 

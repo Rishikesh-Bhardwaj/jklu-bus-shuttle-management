@@ -1,0 +1,122 @@
+name: Resource Lifecycle CI
+
+on:
+  push:
+    branches:
+      - feature/resource-lifecycle-policy
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  backend-build-and-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Inspect backend dependency advisories
+        working-directory: backend
+        run: |
+          npm audit --json > npm-audit.json || true
+          node -e "const audit = require('./npm-audit.json'); console.log(JSON.stringify(audit.vulnerabilities || {}, null, 2));"
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+      - name: Run backend verification suite
+        working-directory: backend
+        run: npm test
+        env:
+          JWT_SECRET: ci-test-secret-at-least-32-characters-long
+          CSRF_SECRET: ci-csrf-secret-at-least-32-characters-long
+          NODE_ENV: test
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  migration-validation:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root-password
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_DATABASE: jklu_bus_shuttle
+          MYSQL_USER: migration_admin
+          MYSQL_PASSWORD: migration-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -umigration_admin -pmigration-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Allow test database trigger creation
+        working-directory: backend
+        run: |
+          node -e "const mysql = require('mysql2/promise'); (async () => { const c = await mysql.createConnection({ host: '127.0.0.1', user: 'root', password: 'root-password' }); await c.query('SET GLOBAL log_bin_trust_function_creators = 1'); await c.end(); })().catch((e) => { console.error(e); process.exit(1); });"
+      - name: Apply all migrations to a clean MySQL database
+        working-directory: backend
+        run: npm run db:migrate
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: jklu_bus_shuttle
+          DB_MIGRATION_USER: migration_admin
+          DB_MIGRATION_PASSWORD: migration-password
+          DB_USER: app_user
+          DB_PASSWORD: app-password
+      - name: Verify lifecycle migration safely resumes after partial application
+        working-directory: backend
+        run: |
+          node -e "const mysql = require('mysql2/promise'); (async () => { const c = await mysql.createConnection({ host: '127.0.0.1', user: 'migration_admin', password: 'migration-password', database: 'jklu_bus_shuttle' }); await c.query(\"DELETE FROM schema_migrations WHERE migration_name = '011_resource_lifecycle_status.sql'\"); await c.end(); })().catch((e) => { console.error(e); process.exit(1); });"
+          npm run db:migrate
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: jklu_bus_shuttle
+          DB_MIGRATION_USER: migration_admin
+          DB_MIGRATION_PASSWORD: migration-password
+          DB_USER: app_user
+          DB_PASSWORD: app-password
+      - name: Verify migrated schema and empty operational tables
+        working-directory: backend
+        run: npm run db:verify
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: jklu_bus_shuttle
+          DB_MIGRATION_USER: migration_admin
+          DB_MIGRATION_PASSWORD: migration-password
+          DB_USER: app_user
+          DB_PASSWORD: app-password
