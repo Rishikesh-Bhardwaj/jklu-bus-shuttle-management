@@ -272,7 +272,7 @@ export async function deleteRoute(req: Request, res: Response): Promise<void> {
     );
 
     if (trips[0].count > 0) {
-      res.status(400).json({
+      res.status(409).json({
         error: `Cannot delete route "${route.route_name}": It is referenced by ${trips[0].count} scheduled or historical trip(s). Deleting this route would break trip schedules and passenger booking records.`,
       });
       return;
@@ -304,7 +304,12 @@ export async function deleteRoute(req: Request, res: Response): Promise<void> {
       });
     } catch (delErr: any) {
       await connection.rollback();
-      res.status(500).json({ error: `Failed to delete route: ${delErr.message}` });
+      const isForeignKey = delErr.code === 'ER_ROW_IS_REFERENCED_2' || delErr.errno === 1451;
+      res.status(isForeignKey ? 409 : 500).json({
+        error: isForeignKey
+          ? 'Cannot delete this route because another record still depends on it. No data was changed.'
+          : `Failed to delete route: ${delErr.message}`,
+      });
     } finally {
       connection.release();
     }
@@ -348,7 +353,7 @@ export async function deleteStop(req: Request, res: Response): Promise<void> {
 
     if (routeRefs.length > 0) {
       const sampleNames = routeRefs.map((r: any) => r.route_name).slice(0, 3).join(', ');
-      res.status(400).json({
+      res.status(409).json({
         error: `Cannot delete stop "${stop.stop_name}": It is currently assigned to ${routeRefs.length} route(s) (${sampleNames}). Remove it from route sequences first.`,
       });
       return;
@@ -374,8 +379,13 @@ export async function deleteStop(req: Request, res: Response): Promise<void> {
       stopId,
     });
   } catch (error: any) {
+    const isForeignKey = error.code === 'ER_ROW_IS_REFERENCED_2' || error.errno === 1451;
     console.error('[STOP_DELETE_ERROR]', error);
-    res.status(500).json({ error: 'Failed to process stop deletion.' });
+    res.status(isForeignKey ? 409 : 500).json({
+      error: isForeignKey
+        ? 'Cannot delete this stop because another record still depends on it. No data was changed.'
+        : 'Failed to process stop deletion.',
+    });
   }
 }
 
@@ -411,7 +421,7 @@ export async function deleteCorridor(req: Request, res: Response): Promise<void>
 
     if (routeRefs.length > 0) {
       const sampleNames = routeRefs.map((r: any) => r.route_name).slice(0, 3).join(', ');
-      res.status(400).json({
+      res.status(409).json({
         error: `Cannot delete corridor "${corridor.corridor_name}": It contains ${routeRefs.length} route(s) (${sampleNames}). Delete or reassign those routes first.`,
       });
       return;
@@ -423,8 +433,13 @@ export async function deleteCorridor(req: Request, res: Response): Promise<void>
       corridorId,
     });
   } catch (error: any) {
+    const isForeignKey = error.code === 'ER_ROW_IS_REFERENCED_2' || error.errno === 1451;
     console.error('[CORRIDOR_DELETE_ERROR]', error);
-    res.status(500).json({ error: 'Failed to process corridor deletion.' });
+    res.status(isForeignKey ? 409 : 500).json({
+      error: isForeignKey
+        ? 'Cannot delete this corridor because another record still depends on it. No data was changed.'
+        : 'Failed to process corridor deletion.',
+    });
   }
 }
 
