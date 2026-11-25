@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/db.js';
-import { isPassengerTripResourceAvailable, isPassengerStopAvailable } from '../utils/resourceLifecyclePolicy.js';
+import { isPassengerTripResourceAvailable } from '../utils/resourceLifecyclePolicy.js';
 
 /**
  * GET /api/trips
