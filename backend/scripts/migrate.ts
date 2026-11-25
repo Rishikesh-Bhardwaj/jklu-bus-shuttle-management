@@ -584,6 +584,53 @@ async function applyMigration010(connection: mysql.Connection, database: string)
 }
 
 /**
+ * Idempotent resource lifecycle status migration.
+ * Each column is added only when absent, then verified against information_schema
+ * before the migration is recorded. This also safely resumes a partially applied run.
+ */
+async function applyResourceLifecycleStatusMigration(connection: mysql.Connection, database: string): Promise<void> {
+  const tables = ['route_corridors', 'routes', 'stops'];
+  console.log('  [MIGRATION 011 RESOURCE LIFECYCLE] Applying and verifying resource status columns...');
+
+  for (const table of tables) {
+    const [beforeRows]: any = await connection.query(
+      `SELECT COLUMN_TYPE, DATA_TYPE, COLLATION_NAME, IS_NULLABLE, COLUMN_DEFAULT
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = 'status'`,
+      [database, table]
+    );
+
+    if (beforeRows.length === 0) {
+      console.log(`    Adding ${table}.status...`);
+      await connection.query(
+        `ALTER TABLE ${table} ADD COLUMN status ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE'`
+      );
+    }
+
+    const [afterRows]: any = await connection.query(
+      `SELECT COLUMN_TYPE, DATA_TYPE, COLLATION_NAME, IS_NULLABLE, COLUMN_DEFAULT
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = 'status'`,
+      [database, table]
+    );
+    const column = afterRows[0];
+    if (
+      afterRows.length !== 1 ||
+      column.DATA_TYPE !== 'enum' ||
+      column.COLUMN_TYPE !== "enum('ACTIVE','INACTIVE')" ||
+      column.COLLATION_NAME !== 'utf8mb4_unicode_ci' ||
+      column.IS_NULLABLE !== 'NO' ||
+      column.COLUMN_DEFAULT !== 'ACTIVE'
+    ) {
+      throw new Error(`Invalid or missing ${table}.status definition: ${JSON.stringify(column)}`);
+    }
+    console.log(`    [VERIFIED] ${table}.status is ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE'.`);
+  }
+
+  console.log('  [MIGRATION 011 RESOURCE LIFECYCLE] All resource status columns successfully verified.');
+}
+
+/**
  * Main migration runner:
  * - Scans src/migrations for *.sql files
  * - Checks schema_migrations table
@@ -687,9 +734,11 @@ async function runMigrations(): Promise<void> {
 
       console.log(`[APPLYING] ${file}...`);
 
-      // Migration 010 uses the step-by-step resilient TypeScript orchestrator (executable source of truth)
+      // Migrations 010 and 011 resource lifecycle use resilient TypeScript orchestrators.
       if (file.startsWith('010_')) {
         await applyMigration010(connection, database);
+      } else if (file.startsWith('011_resource_lifecycle_status')) {
+        await applyResourceLifecycleStatusMigration(connection, database);
       } else {
         const filePath = path.join(migrationsDir, file);
         const sql = fs.readFileSync(filePath, 'utf8');
