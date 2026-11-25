@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 import { pool } from '../config/db.js';
+
+const CHECKIN_QR_SECRET = process.env.JWT_SECRET || 'jklu_bus_shuttle_super_secure_jwt_secret_dev_2026';
 
 /**
  * GET /api/check-ins/manifest/:tripId
@@ -153,3 +156,126 @@ export async function markPassengerNoShow(req: Request, res: Response): Promise<
   }
 }
 
+
+
+/**
+ * POST /api/check-ins/trips/:tripId/qr
+ * MANAGER only: issue a short-lived QR token for the bus to display.
+ */
+export async function generateTripCheckInQr(req: Request, res: Response): Promise<void> {
+  try {
+    const tripId = Number(req.params.tripId);
+    if (!Number.isInteger(tripId) || tripId <= 0) {
+      res.status(400).json({ error: 'Invalid trip ID.' });
+      return;
+    }
+
+    const [rows]: any = await pool.query(
+      'SELECT trip_id, trip_status FROM trips WHERE trip_id = ?',
+      [tripId]
+    );
+    if (!rows.length) {
+      res.status(404).json({ error: 'Trip not found.' });
+      return;
+    }
+    if (rows[0].trip_status !== 'PUBLISHED') {
+      res.status(400).json({ error: 'A bus check-in QR can only be generated for a published trip.' });
+      return;
+    }
+
+    const token = jwt.sign(
+      { purpose: 'BUS_TRIP_CHECKIN', tripId },
+      CHECKIN_QR_SECRET,
+      { expiresIn: '2m' }
+    );
+    res.json({ token, tripId, expiresInSeconds: 120 });
+  } catch (error: any) {
+    console.error('[CHECKIN_QR_GENERATE_ERROR]', error);
+    res.status(500).json({ error: 'Failed to generate the bus check-in QR.' });
+  }
+}
+
+/**
+ * POST /api/check-ins/scan
+ * STUDENT/FACULTY only: validate the bus QR and check in the signed-in passenger.
+ */
+export async function scanBusCheckInQr(req: Request, res: Response): Promise<void> {
+  try {
+    const token = typeof req.body?.token === 'string' ? req.body.token : '';
+    if (!token) {
+      res.status(400).json({ error: 'Bus QR token is required.' });
+      return;
+    }
+
+    let payload: any;
+    try {
+      payload = jwt.verify(token, CHECKIN_QR_SECRET);
+    } catch {
+      res.status(400).json({ error: 'This bus QR has expired or is invalid. Ask the driver to refresh it.' });
+      return;
+    }
+
+    if (payload?.purpose !== 'BUS_TRIP_CHECKIN' || !Number.isInteger(payload.tripId)) {
+      res.status(400).json({ error: 'This QR code is not a valid bus check-in code.' });
+      return;
+    }
+
+    const [rows]: any = await pool.query(
+      `SELECT b.booking_id, b.booking_status, t.trip_status, ci.boarding_status
+       FROM bookings b
+       JOIN trips t ON b.trip_id = t.trip_id
+       JOIN check_ins ci ON ci.booking_id = b.booking_id
+       WHERE b.user_id = ? AND b.trip_id = ?
+       ORDER BY b.booking_id DESC
+       LIMIT 1`,
+      [req.user!.userId, payload.tripId]
+    );
+
+    if (!rows.length) {
+      res.status(403).json({ error: 'No booking was found for your account on this shuttle.' });
+      return;
+    }
+
+    const booking = rows[0];
+    if (booking.trip_status !== 'PUBLISHED') {
+      res.status(400).json({ error: 'This shuttle is not active for boarding.' });
+      return;
+    }
+    if (booking.booking_status !== 'CONFIRMED') {
+      res.status(400).json({ error: 'Your booking is not confirmed and cannot be checked in.' });
+      return;
+    }
+    if (booking.boarding_status === 'BOARDED') {
+      res.status(409).json({ error: 'You have already checked in for this shuttle.' });
+      return;
+    }
+    if (booking.boarding_status !== 'NOT_CHECKED_IN') {
+      res.status(400).json({ error: 'This booking is not eligible for check-in.' });
+      return;
+    }
+
+    const [update]: any = await pool.query(
+      `UPDATE check_ins
+       SET boarding_status = 'BOARDED',
+           boarded_at = CURRENT_TIMESTAMP,
+           marked_by_user_id = NULL
+       WHERE booking_id = ? AND boarding_status = 'NOT_CHECKED_IN'`,
+      [booking.booking_id]
+    );
+
+    if (update.affectedRows !== 1) {
+      res.status(409).json({ error: 'Your check-in was already processed. Refresh your passes.' });
+      return;
+    }
+
+    res.json({
+      message: 'Boarding confirmed. You are checked in!',
+      bookingId: booking.booking_id,
+      tripId: payload.tripId,
+      status: 'BOARDED',
+    });
+  } catch (error: any) {
+    console.error('[CHECKIN_QR_SCAN_ERROR]', error);
+    res.status(500).json({ error: 'Unable to complete bus check-in.' });
+  }
+}
