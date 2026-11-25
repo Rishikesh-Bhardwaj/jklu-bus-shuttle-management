@@ -307,16 +307,12 @@ export async function getBookingById(req: Request, res: Response): Promise<void>
     const isBookingCancelled = booking.booking_status === 'CANCELLED';
     const isValidPass = !isTripCancelled && !isBookingCancelled;
 
+    // Keep the QR payload minimal: it contains identifiers only, not passenger PII.
     const qrPayload = isValidPass
       ? JSON.stringify({
           bookingId: booking.booking_id,
-          userId: booking.user_id,
           tripId: booking.trip_id,
-          seat: booking.seat_number,
-          passenger: booking.passenger_name,
-          tripDate: booking.trip_date,
-          departure: booking.departure_time,
-          signature: `JKLU-PASS-${booking.booking_id}-${booking.trip_id}`,
+          passCode: `JKLU-PASS-${booking.booking_id}-${booking.trip_id}`,
         })
       : null;
 
