@@ -31,7 +31,9 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   const [selectedPass, setSelectedPass] = useState<any | null>(null);
   const [loadingPassId, setLoadingPassId] = useState<number | null>(null);
   const dismissedStorageKey = `jklu-hidden-cancelled-passes-${user?.userId ?? 'guest'}`;
+  const dismissedBoardedStorageKey = `jklu-hidden-boarded-passes-${user?.userId ?? 'guest'}`;
   const [dismissedCancelledIds, setDismissedCancelledIds] = useState<number[]>([]);
+  const [dismissedBoardedIds, setDismissedBoardedIds] = useState<number[]>([]);
   const [scannerOpen, setScannerOpen] = useState<boolean>(false);
   const [scannerBusy, setScannerBusy] = useState<boolean>(false);
   const [scannerMessage, setScannerMessage] = useState<string | null>(null);
@@ -63,6 +65,15 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   }, [dismissedStorageKey]);
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem(dismissedBoardedStorageKey);
+      setDismissedBoardedIds(saved ? JSON.parse(saved) : []);
+    } catch {
+      setDismissedBoardedIds([]);
+    }
+  }, [dismissedBoardedStorageKey]);
+
+  useEffect(() => {
     fetchBookings();
   }, []);
 
@@ -89,7 +100,9 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   };
 
   const boardedBookings = bookings.filter(
-    (booking) => booking.check_in_status === 'BOARDED'
+    (booking) =>
+      booking.check_in_status === 'BOARDED' &&
+      !dismissedBoardedIds.includes(Number(booking.booking_id))
   );
   const activeBookings = bookings.filter(
     (booking) =>
@@ -109,6 +122,18 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
       const next = [...new Set([...current, bookingId])];
       try {
         localStorage.setItem(dismissedStorageKey, JSON.stringify(next));
+      } catch {
+        setError('Could not save this display preference in your browser.');
+      }
+      return next;
+    });
+  };
+
+  const handleRemoveBoardedPass = (bookingId: number) => {
+    setDismissedBoardedIds((current) => {
+      const next = [...new Set([...current, bookingId])];
+      try {
+        localStorage.setItem(dismissedBoardedStorageKey, JSON.stringify(next));
       } catch {
         setError('Could not save this display preference in your browser.');
       }
@@ -457,9 +482,17 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                     <p className="font-semibold text-xs text-neutral-800 dark:text-neutral-200">Booking #{b.booking_id} · {b.route_name}</p>
                     <p className="text-[11px] text-neutral-500">{new Date(b.trip_date).toLocaleDateString()} · Seat {b.seat_number} · {b.departure_time}</p>
                   </div>
-                  <div className="shrink-0 text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <CheckCircle className="w-4 h-4" />
-                    Boarded{b.boarded_at ? ` · ${new Date(b.boarded_at).toLocaleTimeString()}` : ''}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                    <div className="shrink-0 text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle className="w-4 h-4" />
+                      Boarded{b.boarded_at ? ` · ${new Date(b.boarded_at).toLocaleTimeString()}` : ''}
+                    </div>
+                    <button
+                      onClick={() => handleRemoveBoardedPass(Number(b.booking_id))}
+                      className="shrink-0 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      Remove from My Passes
+                    </button>
                   </div>
                 </div>
               ))}
