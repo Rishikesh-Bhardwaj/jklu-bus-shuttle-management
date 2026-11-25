@@ -43,7 +43,11 @@ export async function updateResourceStatus(req: Request, res: Response): Promise
     // Existing scheduled trips must not prevent a manager from restoring a resource.
     // Deactivation remains protected when it would strand scheduled/published trips.
     const isDeactivating = rows[0].status === 'ACTIVE' && status !== 'ACTIVE';
-    if (isDeactivating) {
+    // Route/corridor deactivation controls future passenger discovery. Existing
+    // scheduled trips and their booking history remain untouched; the public
+    // trip listing already excludes inactive routes and corridors.
+    // Keep dependency protection for fleet resources and boarding stops.
+    if (isDeactivating && type !== 'route' && type !== 'corridor') {
       const [trips]: any = await connection.query(c.activeTripSql, [id]);
       if (trips.length) {
         await connection.rollback();
