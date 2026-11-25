@@ -47,3 +47,53 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+  migration-validation:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root-password
+          MYSQL_DATABASE: jklu_bus_shuttle
+          MYSQL_USER: migration_admin
+          MYSQL_PASSWORD: migration-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -umigration_admin -pmigration-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Apply all migrations to a clean MySQL database
+        working-directory: backend
+        run: npm run db:migrate
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: jklu_bus_shuttle
+          DB_MIGRATION_USER: migration_admin
+          DB_MIGRATION_PASSWORD: migration-password
+          DB_USER: app_user
+          DB_PASSWORD: app-password
+      - name: Verify migrated schema and empty operational tables
+        working-directory: backend
+        run: npm run db:verify
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: jklu_bus_shuttle
+          DB_MIGRATION_USER: migration_admin
+          DB_MIGRATION_PASSWORD: migration-password
+          DB_USER: app_user
+          DB_PASSWORD: app-password
