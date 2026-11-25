@@ -317,8 +317,8 @@ export async function updateTrip(req: Request, res: Response): Promise<void> {
     res.status(400).json({ error: 'Invalid trip ID.' });
     return;
   }
-  if (tripStatus !== undefined && !['SCHEDULED', 'PUBLISHED', 'CANCELLED', 'COMPLETED'].includes(tripStatus)) {
-    res.status(400).json({ error: 'Invalid trip status.' });
+  if (tripStatus !== undefined && !['SCHEDULED', 'PUBLISHED', 'COMPLETED'].includes(tripStatus)) {
+    res.status(400).json({ error: 'Invalid trip status. Use the dedicated cancel action for CANCELLED; trips cannot be set to DELETED through update.' });
     return;
   }
   if (tripCategory !== undefined && !['STANDARD', 'EXTRA'].includes(tripCategory)) {
@@ -450,7 +450,7 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
       JOIN routes r ON t.route_id = r.route_id
       JOIN route_corridors c ON r.corridor_id = c.corridor_id
       WHERE t.direction = 'OUTBOUND'
-        AND t.trip_status != 'CANCELLED'
+        AND t.trip_status NOT IN ('CANCELLED', 'DELETED')
         AND t.trip_date >= CURRENT_DATE()
       ORDER BY t.trip_date ASC, c.corridor_name ASC
     `);
