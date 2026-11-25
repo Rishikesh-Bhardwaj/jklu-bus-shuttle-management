@@ -28,6 +28,8 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   const [cancellingId, setCancellingId] = useState<number | null>(null);
   const [cancelModalBooking, setCancelModalBooking] = useState<any | null>(null);
   const [cancelReason, setCancelReason] = useState<string>('Personal schedule change');
+  const [selectedPass, setSelectedPass] = useState<any | null>(null);
+  const [loadingPassId, setLoadingPassId] = useState<number | null>(null);
 
   const fetchBookings = async () => {
     try {
@@ -60,6 +62,26 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
       setError(err.message || 'Failed to cancel booking.');
     } finally {
       setCancellingId(null);
+    }
+  };
+
+  const activeBookings = bookings.filter(
+    (booking) => booking.booking_status === 'CONFIRMED' && booking.trip_status !== 'CANCELLED'
+  );
+
+  const handleOpenPass = async (booking: any) => {
+    try {
+      setLoadingPassId(booking.booking_id);
+      const data = await apiRequest(`/bookings/${booking.booking_id}`);
+      if (!data.boardingPass?.verified || !data.boardingPass?.qrPayload) {
+        setError('This boarding pass is no longer valid.');
+        return;
+      }
+      setSelectedPass(data);
+    } catch (err: any) {
+      setError(err.message || 'Unable to open boarding pass.');
+    } finally {
+      setLoadingPassId(null);
     }
   };
 
@@ -98,14 +120,14 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
           <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
           <p className="text-xs text-neutral-500">Retrieving digital passes...</p>
         </div>
-      ) : bookings.length === 0 ? (
+      ) : activeBookings.length === 0 ? (
         <div className="p-12 text-center bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 text-neutral-500 dark:text-neutral-400 space-y-3">
           <Ticket className="w-12 h-12 text-neutral-300 dark:text-neutral-700 mx-auto" />
           <h3 className="font-bold text-sm text-neutral-800 dark:text-neutral-200">
             No Bookings Found
           </h3>
           <p className="text-xs max-w-sm mx-auto">
-            You currently have no active or historical shuttle passes.
+            You currently have no active shuttle passes. Cancelled bookings are kept in the system for transport records.
           </p>
           <button
             onClick={() => setCurrentView('trips')}
@@ -116,8 +138,8 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {bookings.map((b) => {
-            const isTripCancelled = b.trip_status === 'CANCELLED';
+          {activeBookings.map((b) => {
+            const isTripCancelled = false;
             const isConfirmed = b.booking_status === 'CONFIRMED' && !isTripCancelled;
             const isBoarded = b.check_in_status === 'BOARDED';
 
@@ -252,14 +274,25 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                       </div>
                     </div>
 
-                    {isConfirmed && !isBoarded && !isTripCancelled && (
-                      <button
-                        onClick={() => setCancelModalBooking(b)}
-                        className="px-2.5 py-1 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded border border-rose-200 dark:border-rose-900 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {isConfirmed && (
+                        <button
+                          onClick={() => handleOpenPass(b)}
+                          disabled={loadingPassId === b.booking_id}
+                          className="px-2.5 py-1 text-xs text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/40 rounded border border-primary-200 dark:border-primary-900 transition-colors disabled:opacity-50"
+                        >
+                          {loadingPassId === b.booking_id ? 'Opening...' : 'View QR'}
+                        </button>
+                      )}
+                      {isConfirmed && !isBoarded && (
+                        <button
+                          onClick={() => setCancelModalBooking(b)}
+                          className="px-2.5 py-1 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded border border-rose-200 dark:border-rose-900 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -271,6 +304,33 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Boarding Pass QR Modal */}
+      {selectedPass && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-neutral-900 rounded-2xl shadow-xl border border-neutral-200 dark:border-neutral-800 max-w-sm w-full p-6 space-y-4 text-center">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-neutral-900 dark:text-neutral-100">Digital Boarding Pass</h3>
+              <button onClick={() => setSelectedPass(null)} className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white text-xl" aria-label="Close boarding pass">×</button>
+            </div>
+            <p className="text-xs text-neutral-500">Booking #{selectedPass.booking.booking_id} · Seat {selectedPass.booking.seat_number}</p>
+            <div className="mx-auto w-fit rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white p-3">
+              <img
+                src={`https://quickchart.io/qr?size=220&text=${encodeURIComponent(selectedPass.boardingPass.qrPayload)}`}
+                alt="Boarding pass QR code"
+                className="w-52 h-52"
+              />
+            </div>
+            <div className="text-xs text-neutral-600 dark:text-neutral-300 space-y-1">
+              <p className="font-semibold">{selectedPass.booking.route_name}</p>
+              <p>{new Date(selectedPass.booking.trip_date).toLocaleDateString()} · {selectedPass.booking.departure_time}</p>
+              <p>Boarding stop: {selectedPass.booking.boarding_stop_name}</p>
+            </div>
+            <p className="text-[10px] text-neutral-400">Show this QR code to the transport staff when boarding.</p>
+            <button onClick={() => setSelectedPass(null)} className="w-full px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold">Close Pass</button>
+          </div>
         </div>
       )}
 
