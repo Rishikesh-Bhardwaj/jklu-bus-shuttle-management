@@ -30,12 +30,29 @@ export async function updateResourceStatus(req: Request, res: Response): Promise
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [rows]: any = await connection.query(`SELECT ${c.id}, ${c.label} FROM ${c.table} WHERE ${c.id} = ? FOR UPDATE`, [id]);
-    if (!rows.length) { await connection.rollback(); res.status(404).json({ error: `${type} not found.` }); return; }
-    const [trips]: any = await connection.query(c.activeTripSql, [id]);
-    if (trips.length) {
+    const [rows]: any = await connection.query(
+      `SELECT ${c.id}, ${c.label}, status FROM ${c.table} WHERE ${c.id} = ? FOR UPDATE`,
+      [id]
+    );
+    if (!rows.length) {
       await connection.rollback();
-      res.status(409).json({ error: `Cannot change ${type} status while scheduled/published trips use it. Resolve these trips manually first.`, dependencies: { trips } }); return;
+      res.status(404).json({ error: `${type} not found.` });
+      return;
+    }
+
+    // Existing scheduled trips must not prevent a manager from restoring a resource.
+    // Deactivation remains protected when it would strand scheduled/published trips.
+    const isDeactivating = rows[0].status === 'ACTIVE' && status !== 'ACTIVE';
+    if (isDeactivating) {
+      const [trips]: any = await connection.query(c.activeTripSql, [id]);
+      if (trips.length) {
+        await connection.rollback();
+        res.status(409).json({
+          error: `Cannot deactivate ${type} "${rows[0][c.label]}" while scheduled/published trips use it. Cancel, complete, or reassign those trips first.`,
+          dependencies: { trips },
+        });
+        return;
+      }
     }
     await connection.query(`UPDATE ${c.table} SET status = ? WHERE ${c.id} = ?`, [status, id]);
     await connection.commit();
