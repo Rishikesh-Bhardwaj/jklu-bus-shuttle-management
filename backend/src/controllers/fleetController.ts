@@ -64,6 +64,10 @@ export async function createBus(req: Request, res: Response): Promise<void> {
     res.status(400).json({ error: 'Valid busNo and positive totalSeats are required.' });
     return;
   }
+  if (!['ACTIVE', 'MAINTENANCE', 'RETIRED'].includes(status)) {
+    res.status(400).json({ error: 'Bus status must be ACTIVE, MAINTENANCE, or RETIRED.' });
+    return;
+  }
 
   const trimmedBusNo = String(busNo).trim();
 
@@ -293,6 +297,10 @@ export async function createDriver(req: Request, res: Response): Promise<void> {
 
     if (!driverName || !licenceNumber || !phoneNumber) {
       res.status(400).json({ error: 'Driver name, licence number, and phone number are required.' });
+      return;
+    }
+    if (!['ACTIVE', 'INACTIVE'].includes(status)) {
+      res.status(400).json({ error: 'Driver status must be ACTIVE or INACTIVE.' });
       return;
     }
 
