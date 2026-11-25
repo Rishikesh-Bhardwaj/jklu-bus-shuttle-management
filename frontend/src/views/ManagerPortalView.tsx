@@ -110,6 +110,7 @@ export const ManagerPortalView: React.FC = () => {
     busNo: string;
   } | null>(null);
   const [processingReactivate, setProcessingReactivate] = useState<boolean>(false);
+  const [updatingResourceKey, setUpdatingResourceKey] = useState<string | null>(null);
 
   // -------------------------------------------------------------
   // Data Loaders
@@ -541,14 +542,26 @@ export const ManagerPortalView: React.FC = () => {
   // -------------------------------------------------------------
   const handleResourceStatusToggle = async (type: 'bus' | 'driver' | 'route' | 'stop' | 'corridor', id: number, currentStatus: string, label: string) => {
     const nextStatus = currentStatus === 'ACTIVE' ? (type === 'bus' ? 'RETIRED' : 'INACTIVE') : 'ACTIVE';
+    const resourceKey = `${type}-${id}`;
     try {
-      const result = await apiRequest(`/resources/${type}/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: nextStatus }) });
+      setUpdatingResourceKey(resourceKey);
+      setBannerError(null);
+      setBannerSuccess(null);
+      const result = await apiRequest(`/resources/${type}/${id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (type === 'bus' || type === 'driver') await loadFleet();
+      else await loadRoutesAndStops();
       setBannerSuccess(result.message || `${label} status changed to ${nextStatus}.`);
-      if (type === 'bus' || type === 'driver') loadFleet(); else loadRoutesAndStops();
     } catch (err: any) {
       const trips = err.data?.dependencies?.trips || err.dependencies?.trips;
-      const details = Array.isArray(trips) ? trips.map((trip: any) => `#${trip.trip_id} (${trip.trip_status})`).join(', ') : '';
-      setBannerError((err.message || `Could not update ${label} status.`) + (details ? ` Dependent trips: ${details}.` : ''));
+      const details = Array.isArray(trips)
+        ? trips.map((trip: any) => `#${trip.trip_id} (${trip.trip_status})`).join(', ')
+        : '';
+      setBannerError((err.message || `Could not update ${label} status.`) + (details ? ` Active trips preventing this change: ${details}.` : ''));
+    } finally {
+      setUpdatingResourceKey(null);
     }
   };
   const handleConfirmDelete = async () => {
@@ -949,7 +962,7 @@ export const ManagerPortalView: React.FC = () => {
                       }`}>
                         {bus.status}
                       </span>
-                      <button type="button" onClick={() => handleResourceStatusToggle('bus', bus.bus_id, bus.status, `Bus ${bus.bus_no}`)} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{bus.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button>
+                      <button type="button" onClick={() => handleResourceStatusToggle('bus', bus.bus_id, bus.status, `Bus ${bus.bus_no}`)} disabled={updatingResourceKey === 'bus-' + bus.bus_id} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{bus.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button>
                       {bus.status === 'RETIRED' && (
                         <button
                           type="button"
@@ -1048,7 +1061,7 @@ export const ManagerPortalView: React.FC = () => {
                       }`}>
                         {d.status}
                       </span>
-                      <button type="button" onClick={() => handleResourceStatusToggle('driver', d.driver_id, d.status, `Driver ${d.driver_name}`)} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{d.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button>
+                      <button type="button" onClick={() => handleResourceStatusToggle('driver', d.driver_id, d.status, `Driver ${d.driver_name}`)} disabled={updatingResourceKey === 'driver-' + d.driver_id} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{d.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button>
                     </div>
                   </div>
                 ))}
@@ -1093,7 +1106,7 @@ export const ManagerPortalView: React.FC = () => {
               {corridors.map((c) => (
                 <div key={c.corridor_id} className="p-2 bg-neutral-50 dark:bg-neutral-950 rounded font-medium flex items-center justify-between">
                   <span>{c.corridor_name}</span>
-                  <button type="button" onClick={() => handleResourceStatusToggle('corridor', c.corridor_id, c.status || 'ACTIVE', `Corridor ${c.corridor_name}`)} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{c.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
+                  <button type="button" onClick={() => handleResourceStatusToggle('corridor', c.corridor_id, c.status || 'ACTIVE', `Corridor ${c.corridor_name}`)} disabled={updatingResourceKey === 'corridor-' + c.corridor_id} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{c.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
                 </div>
               ))}
             </div>
@@ -1129,7 +1142,7 @@ export const ManagerPortalView: React.FC = () => {
               {stops.map((s) => (
                 <div key={s.stop_id} className="p-1.5 bg-neutral-50 dark:bg-neutral-950 rounded text-[11px] flex items-center justify-between">
                   <span>{s.stop_name}</span>
-                  <button type="button" onClick={() => handleResourceStatusToggle('stop', s.stop_id, s.status || 'ACTIVE', `Stop ${s.stop_name}`)} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{s.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
+                  <button type="button" onClick={() => handleResourceStatusToggle('stop', s.stop_id, s.status || 'ACTIVE', `Stop ${s.stop_name}`)} disabled={updatingResourceKey === 'stop-' + s.stop_id} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{s.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
                 </div>
               ))}
             </div>
@@ -1287,7 +1300,7 @@ export const ManagerPortalView: React.FC = () => {
                           {r.origin} → {r.destination}
                         </td>
                         <td className="p-2.5 text-right">
-                          <button type="button" onClick={() => handleResourceStatusToggle('route', r.route_id, r.status || 'ACTIVE', `Route ${r.route_name}`)} className="px-2 py-1 mr-2 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{r.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
+                          <button type="button" onClick={() => handleResourceStatusToggle('route', r.route_id, r.status || 'ACTIVE', `Route ${r.route_name}`)} disabled={updatingResourceKey === 'route-' + r.route_id} className="px-2 py-1 mr-2 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{r.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
                         </td>
                       </tr>
                     ))}
