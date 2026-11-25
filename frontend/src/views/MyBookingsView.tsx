@@ -31,7 +31,9 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   const [selectedPass, setSelectedPass] = useState<any | null>(null);
   const [loadingPassId, setLoadingPassId] = useState<number | null>(null);
   const dismissedStorageKey = `jklu-hidden-cancelled-passes-${user?.userId ?? 'guest'}`;
+  const dismissedBoardedStorageKey = `jklu-hidden-boarded-passes-${user?.userId ?? 'guest'}`;
   const [dismissedCancelledIds, setDismissedCancelledIds] = useState<number[]>([]);
+  const [dismissedBoardedIds, setDismissedBoardedIds] = useState<number[]>([]);
   const [scannerOpen, setScannerOpen] = useState<boolean>(false);
   const [scannerBusy, setScannerBusy] = useState<boolean>(false);
   const [scannerMessage, setScannerMessage] = useState<string | null>(null);
@@ -63,6 +65,15 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   }, [dismissedStorageKey]);
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem(dismissedBoardedStorageKey);
+      setDismissedBoardedIds(saved ? JSON.parse(saved) : []);
+    } catch {
+      setDismissedBoardedIds([]);
+    }
+  }, [dismissedBoardedStorageKey]);
+
+  useEffect(() => {
     fetchBookings();
   }, []);
 
@@ -88,11 +99,20 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
     }
   };
 
+  const boardedBookings = bookings.filter(
+    (booking) =>
+      booking.check_in_status === 'BOARDED' &&
+      !dismissedBoardedIds.includes(Number(booking.booking_id))
+  );
   const activeBookings = bookings.filter(
-    (booking) => booking.booking_status === 'CONFIRMED' && !['CANCELLED', 'DELETED'].includes(booking.trip_status)
+    (booking) =>
+      booking.booking_status === 'CONFIRMED' &&
+      booking.check_in_status !== 'BOARDED' &&
+      !['CANCELLED', 'DELETED'].includes(booking.trip_status)
   );
   const cancelledBookings = bookings.filter(
     (booking) =>
+      booking.check_in_status !== 'BOARDED' &&
       (booking.booking_status === 'CANCELLED' || ['CANCELLED', 'DELETED'].includes(booking.trip_status)) &&
       !dismissedCancelledIds.includes(Number(booking.booking_id))
   );
@@ -102,6 +122,18 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
       const next = [...new Set([...current, bookingId])];
       try {
         localStorage.setItem(dismissedStorageKey, JSON.stringify(next));
+      } catch {
+        setError('Could not save this display preference in your browser.');
+      }
+      return next;
+    });
+  };
+
+  const handleRemoveBoardedPass = (bookingId: number) => {
+    setDismissedBoardedIds((current) => {
+      const next = [...new Set([...current, bookingId])];
+      try {
+        localStorage.setItem(dismissedBoardedStorageKey, JSON.stringify(next));
       } catch {
         setError('Could not save this display preference in your browser.');
       }
@@ -247,7 +279,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
           <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
           <p className="text-xs text-neutral-500">Retrieving digital passes...</p>
         </div>
-      ) : activeBookings.length === 0 && cancelledBookings.length === 0 ? (
+      ) : activeBookings.length === 0 && boardedBookings.length === 0 && cancelledBookings.length === 0 ? (
         <div className="p-12 text-center bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 text-neutral-500 dark:text-neutral-400 space-y-3">
           <Ticket className="w-12 h-12 text-neutral-300 dark:text-neutral-700 mx-auto" />
           <h3 className="font-bold text-sm text-neutral-800 dark:text-neutral-200">
@@ -437,6 +469,36 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
             );
           })}
         </div>}
+        {boardedBookings.length > 0 && (
+          <section className="space-y-3">
+            <div>
+              <h3 className="font-bold text-sm text-neutral-800 dark:text-neutral-200">Boarded Passes</h3>
+              <p className="text-xs text-neutral-500">Completed trips appear here. Your boarding records remain saved in your booking history.</p>
+            </div>
+            <div className="space-y-2">
+              {boardedBookings.map((b) => (
+                <div key={b.booking_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-white dark:bg-neutral-900 p-4">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-xs text-neutral-800 dark:text-neutral-200">Booking #{b.booking_id} · {b.route_name}</p>
+                    <p className="text-[11px] text-neutral-500">{new Date(b.trip_date).toLocaleDateString()} · Seat {b.seat_number} · {b.departure_time}</p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                    <div className="shrink-0 text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle className="w-4 h-4" />
+                      Boarded{b.boarded_at ? ` · ${new Date(b.boarded_at).toLocaleTimeString()}` : ''}
+                    </div>
+                    <button
+                      onClick={() => handleRemoveBoardedPass(Number(b.booking_id))}
+                      className="shrink-0 px-3 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      Remove from My Passes
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         {cancelledBookings.length > 0 && (
           <section className="space-y-3">
             <div>
