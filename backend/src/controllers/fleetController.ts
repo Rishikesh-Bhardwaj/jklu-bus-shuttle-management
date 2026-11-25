@@ -142,40 +142,41 @@ export async function createBus(req: Request, res: Response): Promise<void> {
  * MANAGER only: Update bus status.
  */
 export async function updateBus(req: Request, res: Response): Promise<void> {
+  const busId = Number.parseInt(req.params.id, 10);
+  const { status } = req.body;
+  if (!Number.isInteger(busId) || busId <= 0) {
+    res.status(400).json({ error: 'Invalid bus ID.' }); return;
+  }
+  if (!['ACTIVE', 'MAINTENANCE', 'RETIRED'].includes(status)) {
+    res.status(400).json({ error: 'Invalid status. Must be ACTIVE, MAINTENANCE, or RETIRED.' }); return;
+  }
+  const connection = await pool.getConnection();
+  let transactionStarted = false;
   try {
-    const busId = parseInt(req.params.id, 10);
-    const { status } = req.body;
-
-    if (!['ACTIVE', 'MAINTENANCE', 'RETIRED'].includes(status)) {
-      res.status(400).json({ error: 'Invalid status. Must be ACTIVE, MAINTENANCE, or RETIRED.' });
-      return;
+    await connection.beginTransaction(); transactionStarted = true;
+    const [buses]: any = await connection.query(
+      'SELECT bus_id FROM buses WHERE bus_id = ? FOR UPDATE', [busId]
+    );
+    if (!buses.length) {
+      await connection.rollback(); transactionStarted = false;
+      res.status(404).json({ error: 'Bus not found.' }); return;
     }
-
-    const [activeTrips]: any = await pool.query(
-      `SELECT trip_id, trip_date, departure_time, trip_status FROM trips
-       WHERE bus_id = ? AND trip_status IN ('SCHEDULED','PUBLISHED')
-       ORDER BY trip_date, departure_time`,
+    const [activeTrips]: any = await connection.query(
+      "SELECT trip_id, trip_date, departure_time, trip_status FROM trips WHERE bus_id = ? AND trip_status IN ('SCHEDULED','PUBLISHED') ORDER BY trip_date, departure_time",
       [busId]
     );
     if (activeTrips.length) {
-      res.status(409).json({ error: 'Cannot change bus status while scheduled/published trips use it. Resolve these trips manually first.', dependencies: { trips: activeTrips } });
-      return;
+      await connection.rollback(); transactionStarted = false;
+      res.status(409).json({ error: 'Cannot change bus status while scheduled/published trips use it. Resolve these trips manually first.', dependencies: { trips: activeTrips } }); return;
     }
-    const [result]: any = await pool.query(
-      `UPDATE buses SET status = ? WHERE bus_id = ?`,
-      [status, busId]
-    );
-
-    if (result.affectedRows === 0) {
-      res.status(404).json({ error: 'Bus not found.' });
-      return;
-    }
-
+    await connection.query('UPDATE buses SET status = ? WHERE bus_id = ?', [status, busId]);
+    await connection.commit(); transactionStarted = false;
     res.json({ message: 'Bus updated successfully.', busId, status });
   } catch (error: any) {
+    if (transactionStarted) { try { await connection.rollback(); } catch { /* preserve original error */ } }
     console.error('[FLEET_BUS_UPDATE_ERROR]', error);
     res.status(500).json({ error: 'Failed to update bus.' });
-  }
+  } finally { connection.release(); }
 }
 
 /**
@@ -325,45 +326,52 @@ export async function createDriver(req: Request, res: Response): Promise<void> {
  * MANAGER only: Update driver status and info.
  */
 export async function updateDriver(req: Request, res: Response): Promise<void> {
+  const driverId = Number.parseInt(req.params.id, 10);
+  const { driverName, licenceNumber, phoneNumber, status } = req.body;
+  if (!Number.isInteger(driverId) || driverId <= 0) {
+    res.status(400).json({ error: 'Invalid driver ID.' }); return;
+  }
+  if (status !== undefined && !['ACTIVE', 'INACTIVE'].includes(status)) {
+    res.status(400).json({ error: 'Driver status must be ACTIVE or INACTIVE.' }); return;
+  }
+  const connection = await pool.getConnection();
+  let transactionStarted = false;
   try {
-    const driverId = parseInt(req.params.id, 10);
-    const { driverName, licenceNumber, phoneNumber, status } = req.body;
-
-    if (status) {
-      if (!['ACTIVE', 'INACTIVE'].includes(status)) {
-        res.status(400).json({ error: 'Driver status must be ACTIVE or INACTIVE.' }); return;
-      }
-      const [activeTrips]: any = await pool.query(
-        `SELECT trip_id, trip_date, departure_time, trip_status FROM trips
-         WHERE driver_id = ? AND trip_status IN ('SCHEDULED','PUBLISHED')
-         ORDER BY trip_date, departure_time`,
+    await connection.beginTransaction(); transactionStarted = true;
+    const [drivers]: any = await connection.query(
+      'SELECT driver_id FROM drivers WHERE driver_id = ? FOR UPDATE', [driverId]
+    );
+    if (!drivers.length) {
+      await connection.rollback(); transactionStarted = false;
+      res.status(404).json({ error: 'Driver not found.' }); return;
+    }
+    if (status !== undefined) {
+      const [activeTrips]: any = await connection.query(
+        "SELECT trip_id, trip_date, departure_time, trip_status FROM trips WHERE driver_id = ? AND trip_status IN ('SCHEDULED','PUBLISHED') ORDER BY trip_date, departure_time",
         [driverId]
       );
       if (activeTrips.length) {
-        res.status(409).json({ error: 'Cannot change driver status while scheduled/published trips use this driver. Resolve these trips manually first.', dependencies: { trips: activeTrips } });
-        return;
+        await connection.rollback(); transactionStarted = false;
+        res.status(409).json({ error: 'Cannot change driver status while scheduled/published trips use this driver. Resolve these trips manually first.', dependencies: { trips: activeTrips } }); return;
       }
     }
-    const [result]: any = await pool.query(
+    await connection.query(
       `UPDATE drivers
        SET driver_name = COALESCE(?, driver_name),
            licence_number = COALESCE(?, licence_number),
            phone_number = COALESCE(?, phone_number),
            status = COALESCE(?, status)
        WHERE driver_id = ?`,
-      [driverName?.trim() || null, licenceNumber?.trim() || null, phoneNumber?.trim() || null, status || null, driverId]
+      [driverName?.trim() || null, licenceNumber?.trim() || null,
+       phoneNumber?.trim() || null, status ?? null, driverId]
     );
-
-    if (result.affectedRows === 0) {
-      res.status(404).json({ error: 'Driver not found.' });
-      return;
-    }
-
+    await connection.commit(); transactionStarted = false;
     res.json({ message: 'Driver updated successfully.', driverId });
   } catch (error: any) {
+    if (transactionStarted) { try { await connection.rollback(); } catch { /* preserve original error */ } }
     console.error('[FLEET_DRIVER_UPDATE_ERROR]', error);
     res.status(500).json({ error: 'Failed to update driver.' });
-  }
+  } finally { connection.release(); }
 }
 
 /**
