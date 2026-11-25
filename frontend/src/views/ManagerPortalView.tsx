@@ -1130,22 +1130,6 @@ export const ManagerPortalView: React.FC = () => {
                 <div key={s.stop_id} className="p-1.5 bg-neutral-50 dark:bg-neutral-950 rounded text-[11px] flex items-center justify-between">
                   <span>{s.stop_name}</span>
                   <button type="button" onClick={() => handleResourceStatusToggle('stop', s.stop_id, s.status || 'ACTIVE', `Stop ${s.stop_name}`)} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{s.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteConfirmModal({
-                      isOpen: true,
-                      title: 'Delete Boarding Stop',
-                      message: `Are you sure you want to delete stop "${s.stop_name}"?`,
-                      details: 'Stops currently assigned to routes or historical bookings cannot be deleted until those references are cleared.',
-                      itemType: 'stop',
-                      itemId: s.stop_id,
-                      itemName: s.stop_name
-                    })}
-                    className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors"
-                    title="Delete Stop"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               ))}
             </div>
