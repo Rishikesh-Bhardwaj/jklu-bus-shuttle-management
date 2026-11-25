@@ -311,39 +311,126 @@ export async function createTrip(req: Request, res: Response): Promise<void> {
  * MANAGER only: Update trip details and status.
  */
 export async function updateTrip(req: Request, res: Response): Promise<void> {
+  const tripId = Number.parseInt(req.params.id, 10);
+  const { driverId, busId, departureTime, estimatedArrivalTime, tripStatus, tripCategory } = req.body;
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    res.status(400).json({ error: 'Invalid trip ID.' });
+    return;
+  }
+  if (tripStatus !== undefined && !['SCHEDULED', 'PUBLISHED', 'CANCELLED', 'COMPLETED'].includes(tripStatus)) {
+    res.status(400).json({ error: 'Invalid trip status.' });
+    return;
+  }
+  if (tripCategory !== undefined && !['STANDARD', 'EXTRA'].includes(tripCategory)) {
+    res.status(400).json({ error: 'Invalid trip category.' });
+    return;
+  }
+
+  const connection = await pool.getConnection();
+  let transactionStarted = false;
   try {
-    const tripId = parseInt(req.params.id, 10);
-    const { driverId, busId, departureTime, estimatedArrivalTime, tripStatus, tripCategory } = req.body;
-
-    const [result]: any = await pool.query(
-      `UPDATE trips
-       SET driver_id = COALESCE(?, driver_id),
-           bus_id = COALESCE(?, bus_id),
-           departure_time = COALESCE(?, departure_time),
-           estimated_arrival_time = COALESCE(?, estimated_arrival_time),
-           trip_status = COALESCE(?, trip_status),
-           trip_category = COALESCE(?, trip_category)
-       WHERE trip_id = ?`,
-      [
-        driverId ?? null,
-        busId ?? null,
-        departureTime ?? null,
-        estimatedArrivalTime ?? null,
-        tripStatus ?? null,
-        tripCategory ?? null,
-        tripId,
-      ]
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [existingRows]: any = await connection.query(
+      'SELECT trip_id, route_id, bus_id, driver_id, trip_status FROM trips WHERE trip_id = ? FOR UPDATE',
+      [tripId]
     );
-
-    if (result.affectedRows === 0) {
+    if (!existingRows.length) {
+      await connection.rollback(); transactionStarted = false;
       res.status(404).json({ error: 'Trip not found.' });
       return;
     }
 
+    const existing = existingRows[0];
+    const nextBusId = busId ?? existing.bus_id;
+    const nextDriverId = driverId === undefined ? existing.driver_id : (driverId || null);
+    const nextStatus = tripStatus ?? existing.trip_status;
+
+    // Any trip being scheduled/published must continue to reference active resources.
+    if (['SCHEDULED', 'PUBLISHED'].includes(nextStatus)) {
+      const [routeInfo]: any = await connection.query(
+        'SELECT corridor_id FROM routes WHERE route_id = ?',
+        [existing.route_id]
+      );
+      if (!routeInfo.length) {
+        await connection.rollback(); transactionStarted = false;
+        res.status(409).json({ error: 'Cannot activate this trip because its route no longer exists.' });
+        return;
+      }
+      const corridorId = routeInfo[0].corridor_id;
+      const [corridors]: any = await connection.query(
+        'SELECT status FROM route_corridors WHERE corridor_id = ? FOR UPDATE',
+        [corridorId]
+      );
+      const [routes]: any = await connection.query(
+        'SELECT status FROM routes WHERE route_id = ? FOR UPDATE',
+        [existing.route_id]
+      );
+      const [buses]: any = await connection.query(
+        'SELECT status FROM buses WHERE bus_id = ? FOR UPDATE',
+        [nextBusId]
+      );
+      if (!corridors.length || corridors[0].status !== 'ACTIVE' ||
+          !routes.length || routes[0].status !== 'ACTIVE') {
+        await connection.rollback(); transactionStarted = false;
+        res.status(409).json({ error: 'Cannot schedule or publish this trip while its route or corridor is inactive.' });
+        return;
+      }
+      if (!buses.length || buses[0].status !== 'ACTIVE') {
+        await connection.rollback(); transactionStarted = false;
+        res.status(409).json({ error: 'Cannot schedule or publish this trip with an inactive or unavailable bus.' });
+        return;
+      }
+      if (nextDriverId) {
+        const [drivers]: any = await connection.query(
+          'SELECT status FROM drivers WHERE driver_id = ? FOR UPDATE',
+          [nextDriverId]
+        );
+        if (!drivers.length || drivers[0].status !== 'ACTIVE') {
+          await connection.rollback(); transactionStarted = false;
+          res.status(409).json({ error: 'Cannot schedule or publish this trip with an inactive or unavailable driver.' });
+          return;
+        }
+      }
+      const [routeStops]: any = await connection.query(
+        'SELECT stop_id FROM route_stops WHERE route_id = ? ORDER BY stop_id ASC',
+        [existing.route_id]
+      );
+      const stopIds = routeStops.map((row: any) => Number(row.stop_id)).sort((a: number, b: number) => a - b);
+      for (const stopId of stopIds) {
+        const [stops]: any = await connection.query(
+          'SELECT status FROM stops WHERE stop_id = ? FOR UPDATE',
+          [stopId]
+        );
+        if (!stops.length || stops[0].status !== 'ACTIVE') {
+          await connection.rollback(); transactionStarted = false;
+          res.status(409).json({ error: 'Cannot schedule or publish this trip because its route contains an inactive or unavailable stop.', dependencies: { stops: [{ stop_id: stopId }] } });
+          return;
+        }
+      }
+    }
+
+    await connection.query(
+      `UPDATE trips
+       SET driver_id = ?, bus_id = ?,
+           departure_time = COALESCE(?, departure_time),
+           estimated_arrival_time = COALESCE(?, estimated_arrival_time),
+           trip_status = ?, trip_category = COALESCE(?, trip_category)
+       WHERE trip_id = ?`,
+      [nextDriverId, nextBusId, departureTime ?? null, estimatedArrivalTime ?? null,
+       nextStatus, tripCategory ?? null, tripId]
+    );
+    await connection.commit();
+    transactionStarted = false;
     res.json({ message: 'Trip updated successfully.', tripId });
   } catch (error: any) {
+    if (transactionStarted) {
+      try { await connection.rollback(); } catch { /* preserve original error */ }
+    }
     console.error('[TRIP_UPDATE_ERROR]', error);
     res.status(500).json({ error: 'Failed to update trip.' });
+  } finally {
+    connection.release();
   }
 }
 
