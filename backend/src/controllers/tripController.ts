@@ -23,7 +23,7 @@ export async function listTrips(req: Request, res: Response): Promise<void> {
       JOIN route_corridors c ON r.corridor_id = c.corridor_id
       JOIN buses b ON t.bus_id = b.bus_id
       LEFT JOIN drivers d ON t.driver_id = d.driver_id
-      WHERE 1=1
+      WHERE t.trip_status <> 'DELETED'
     `;
     const params: any[] = [];
 
