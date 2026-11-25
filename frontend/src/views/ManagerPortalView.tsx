@@ -950,8 +950,7 @@ export const ManagerPortalView: React.FC = () => {
                         {bus.status}
                       </span>
                       <button type="button" onClick={() => handleResourceStatusToggle('bus', bus.bus_id, bus.status, `Bus ${bus.bus_no}`)} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{bus.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button>
-                      {bus.status === 'RETIRED' ? (
-                        <>
+                      {bus.status === 'RETIRED' && (
                         <button
                           type="button"
                           onClick={() => setReactivateConfirmModal({
@@ -964,40 +963,6 @@ export const ManagerPortalView: React.FC = () => {
                         >
                           <RotateCcw className="w-3 h-3" />
                           <span>Reactivate</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteConfirmModal({
-                            isOpen: true,
-                            title: 'Permanently Delete Bus',
-                            message: `Are you sure you want to permanently delete bus "${bus.bus_no}" and its seat inventory?`,
-                            details: 'Deletion is allowed only when no trips or passenger bookings reference this bus. Otherwise, the request will be blocked and the records will remain unchanged.',
-                            itemType: 'bus',
-                            itemId: bus.bus_id,
-                            itemName: bus.bus_no
-                          })}
-                          className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                          title="Permanently Delete Bus"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setDeleteConfirmModal({
-                            isOpen: true,
-                            title: 'Permanently Delete Bus',
-                            message: `Are you sure you want to permanently delete bus "${bus.bus_no}" and its seat inventory?`,
-                            details: 'Deletion is allowed only when no trips or passenger bookings reference this bus. Otherwise, the request will be blocked and the records will remain unchanged.',
-                            itemType: 'bus',
-                            itemId: bus.bus_id,
-                            itemName: bus.bus_no,
-                          })}
-                          className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                          title="Permanently Delete Bus"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
@@ -1084,22 +1049,6 @@ export const ManagerPortalView: React.FC = () => {
                         {d.status}
                       </span>
                       <button type="button" onClick={() => handleResourceStatusToggle('driver', d.driver_id, d.status, `Driver ${d.driver_name}`)} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{d.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteConfirmModal({
-                          isOpen: true,
-                          title: 'Permanently Delete Driver',
-                          message: `Are you sure you want to permanently delete driver "${d.driver_name}"?`,
-                          details: 'Deletion is allowed only when no trip references this driver. Otherwise, the request will be blocked and the records will remain unchanged.',
-                          itemType: 'driver',
-                          itemId: d.driver_id,
-                          itemName: d.driver_name
-                        })}
-                        className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                        title="Permanently Delete Driver"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
                     </div>
                   </div>
                 ))}
@@ -1145,22 +1094,6 @@ export const ManagerPortalView: React.FC = () => {
                 <div key={c.corridor_id} className="p-2 bg-neutral-50 dark:bg-neutral-950 rounded font-medium flex items-center justify-between">
                   <span>{c.corridor_name}</span>
                   <button type="button" onClick={() => handleResourceStatusToggle('corridor', c.corridor_id, c.status || 'ACTIVE', `Corridor ${c.corridor_name}`)} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{c.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteConfirmModal({
-                      isOpen: true,
-                      title: 'Delete Corridor',
-                      message: `Are you sure you want to delete corridor "${c.corridor_name}"?`,
-                      details: 'Corridors assigned to active or existing routes cannot be deleted. All dependent routes must be removed first.',
-                      itemType: 'corridor',
-                      itemId: c.corridor_id,
-                      itemName: c.corridor_name
-                    })}
-                    className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors"
-                    title="Delete Corridor"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               ))}
             </div>
@@ -1371,22 +1304,6 @@ export const ManagerPortalView: React.FC = () => {
                         </td>
                         <td className="p-2.5 text-right">
                           <button type="button" onClick={() => handleResourceStatusToggle('route', r.route_id, r.status || 'ACTIVE', `Route ${r.route_name}`)} className="px-2 py-1 mr-2 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{r.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteConfirmModal({
-                              isOpen: true,
-                              title: 'Delete Route',
-                              message: `Are you sure you want to delete route "${r.route_name}"?`,
-                              details: 'Routes assigned to scheduled trips or paired return routes cannot be deleted until those references are removed.',
-                              itemType: 'route',
-                              itemId: r.route_id,
-                              itemName: r.route_name
-                            })}
-                            className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors"
-                            title="Delete Route"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
                         </td>
                       </tr>
                     ))}
