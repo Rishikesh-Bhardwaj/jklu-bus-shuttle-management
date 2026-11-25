@@ -27,6 +27,12 @@ export async function listTrips(req: Request, res: Response): Promise<void> {
     `;
     const params: any[] = [];
 
+    // Students should only see trips that are available to book. Managers retain
+    // visibility of cancelled trips for operational history and review.
+    if (req.user?.role !== 'MANAGER') {
+      query += ` AND t.trip_status <> 'CANCELLED'`;
+    }
+
     if (date) {
       query += ` AND t.trip_date = ?`;
       params.push(date);
