@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/db.js';
+import { isPassengerTripResourceAvailable, isPassengerStopAvailable } from '../utils/resourceLifecyclePolicy.js';
 
 /**
  * POST /api/bookings
@@ -20,9 +21,15 @@ export async function createBooking(req: Request, res: Response): Promise<void> 
 
     // 1. Fetch trip and verify status
     const [trips]: any = await connection.query(
-      `SELECT trip_id, route_id, bus_id, direction, trip_date, departure_time, trip_status
-       FROM trips
-       WHERE trip_id = ? FOR UPDATE`,
+      `SELECT t.trip_id, t.route_id, t.bus_id, t.direction, t.trip_date, t.departure_time, t.trip_status,
+              r.status AS route_status, c.status AS corridor_status,
+              b.status AS bus_status, d.status AS driver_status
+       FROM trips t
+       JOIN routes r ON r.route_id = t.route_id
+       JOIN route_corridors c ON c.corridor_id = r.corridor_id
+       JOIN buses b ON b.bus_id = t.bus_id
+       LEFT JOIN drivers d ON d.driver_id = t.driver_id
+       WHERE t.trip_id = ? FOR UPDATE`,
       [tripId]
     );
 
@@ -41,15 +48,29 @@ export async function createBooking(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // 2. Verify boarding stop belongs to the trip's route
+    if (!isPassengerTripResourceAvailable({
+      routeStatus: trip.route_status,
+      corridorStatus: trip.corridor_status,
+      busStatus: trip.bus_status,
+      driverStatus: trip.driver_status,
+    })) {
+      await connection.rollback();
+      res.status(409).json({ error: 'This trip is no longer available because one or more assigned transport resources are inactive.' });
+      return;
+    }
+
+    // 2. Verify boarding stop belongs to the trip's route and is active.
     const [stopCheck]: any = await connection.query(
-      `SELECT route_stop_id FROM route_stops WHERE route_id = ? AND stop_id = ?`,
+      `SELECT rs.route_stop_id, s.status
+       FROM route_stops rs
+       JOIN stops s ON s.stop_id = rs.stop_id
+       WHERE rs.route_id = ? AND rs.stop_id = ? FOR UPDATE`,
       [trip.route_id, boardingStopId]
     );
 
-    if (stopCheck.length === 0) {
+    if (stopCheck.length === 0 || !isPassengerStopAvailable(stopCheck[0].status)) {
       await connection.rollback();
-      res.status(400).json({ error: 'Selected boarding stop does not belong to this route.' });
+      res.status(400).json({ error: 'Selected boarding stop is not part of this route or is inactive.' });
       return;
     }
 
