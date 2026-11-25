@@ -186,9 +186,9 @@ export async function generateTripCheckInQr(req: Request, res: Response): Promis
     const token = jwt.sign(
       { purpose: 'BUS_TRIP_CHECKIN', tripId },
       CHECKIN_QR_SECRET,
-      { expiresIn: '2m' }
+      { expiresIn: '1h' }
     );
-    res.json({ token, tripId, expiresInSeconds: 120 });
+    res.json({ token, tripId, expiresInSeconds: 3600 });
   } catch (error: any) {
     console.error('[CHECKIN_QR_GENERATE_ERROR]', error);
     res.status(500).json({ error: 'Failed to generate the bus check-in QR.' });
