@@ -89,11 +89,11 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
   };
 
   const activeBookings = bookings.filter(
-    (booking) => booking.booking_status === 'CONFIRMED' && booking.trip_status !== 'CANCELLED'
+    (booking) => booking.booking_status === 'CONFIRMED' && !['CANCELLED', 'DELETED'].includes(booking.trip_status)
   );
   const cancelledBookings = bookings.filter(
     (booking) =>
-      (booking.booking_status === 'CANCELLED' || booking.trip_status === 'CANCELLED') &&
+      (booking.booking_status === 'CANCELLED' || ['CANCELLED', 'DELETED'].includes(booking.trip_status)) &&
       !dismissedCancelledIds.includes(Number(booking.booking_id))
   );
 
@@ -267,7 +267,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
         <div className="space-y-8">
         {activeBookings.length > 0 && <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {activeBookings.map((b) => {
-            const isTripCancelled = false;
+            const isTripCancelled = ['CANCELLED', 'DELETED'].includes(b.trip_status);
             const isConfirmed = b.booking_status === 'CONFIRMED' && !isTripCancelled;
             const isBoarded = b.check_in_status === 'BOARDED';
 
@@ -289,7 +289,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                   <div className="flex items-center space-x-2">
                     <Bus className={`w-4 h-4 ${isTripCancelled ? 'text-rose-400' : 'text-primary-300'}`} />
                     <span className="font-bold text-xs uppercase tracking-wider">
-                      {isTripCancelled ? 'JKLU Boarding Pass (Cancelled)' : 'JKLU Boarding Pass'}
+                      {b.trip_status === 'DELETED' ? 'JKLU Boarding Pass (Trip Deleted)' : isTripCancelled ? 'JKLU Boarding Pass (Cancelled)' : 'JKLU Boarding Pass'}
                     </span>
                   </div>
                   <span className={`font-mono text-[11px] px-2 py-0.5 rounded font-semibold ${
@@ -378,13 +378,13 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                       </div>
                       <div>
                         <span className="text-[10px] text-neutral-400 font-mono block">
-                          {isTripCancelled ? 'Pass Inactive (Trip Cancelled)' : `Pass Code: JKLU-T${b.trip_id}-S${b.seat_number}`}
+                          {b.trip_status === 'DELETED' ? 'Pass Inactive (Trip Deleted)' : isTripCancelled ? 'Pass Inactive (Trip Cancelled)' : `Pass Code: JKLU-T${b.trip_id}-S${b.seat_number}`}
                         </span>
                         <div className="flex items-center gap-1.5 font-semibold text-xs mt-0.5">
                           {isTripCancelled ? (
                             <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1 font-bold">
                               <XCircle className="w-3.5 h-3.5" />
-                              Trip Cancelled by Transport
+                              {b.trip_status === 'DELETED' ? 'Trip Deleted by Transport' : 'Trip Cancelled by Transport'}
                             </span>
                           ) : isBoarded ? (
                             <span className="text-emerald-600 flex items-center gap-1">
@@ -448,7 +448,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({ setCurrentView }
                 <div key={b.booking_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
                   <div className="min-w-0">
                     <p className="font-semibold text-xs text-neutral-800 dark:text-neutral-200">Booking #{b.booking_id} · {b.route_name}</p>
-                    <p className="text-[11px] text-neutral-500">{new Date(b.trip_date).toLocaleDateString()} · Seat {b.seat_number} · {b.trip_status === 'CANCELLED' ? 'Trip cancelled by transport' : 'Booking cancelled'}</p>
+                    <p className="text-[11px] text-neutral-500">{new Date(b.trip_date).toLocaleDateString()} · Seat {b.seat_number} · {b.trip_status === 'DELETED' ? 'Trip deleted by transport' : b.trip_status === 'CANCELLED' ? 'Trip cancelled by transport' : 'Booking cancelled'}</p>
                   </div>
                   <button
                     onClick={() => handleRemoveCancelledPass(Number(b.booking_id))}

@@ -443,6 +443,16 @@ export const ManagerPortalView: React.FC = () => {
     }
   };
 
+  const handleCancelTrip = async (tripId: number) => {
+    try {
+      const result = await apiRequest(`/trips/${tripId}/cancel`, { method: 'POST' });
+      setBannerSuccess(result.message || `Trip #${tripId} cancelled. Passenger history preserved.`);
+      loadTrips();
+    } catch (err: any) {
+      setBannerError(err.message || 'Failed to cancel trip.');
+    }
+  };
+
   const handleUpdateTripStatus = async (tripId: number, status: string) => {
     try {
       await apiRequest(`/trips/${tripId}`, {
@@ -570,7 +580,7 @@ export const ManagerPortalView: React.FC = () => {
         loadRoutesAndStops();
       } else if (itemType === 'trip') {
         res = await apiRequest(`/trips/${itemId}`, { method: 'DELETE' });
-        setBannerSuccess(res.message || `Trip #${itemId} cancelled.`);
+        setBannerSuccess(res.message || `Trip #${itemId} deleted. Passenger history preserved.`);
         loadTrips();
       }
       setDeleteConfirmModal(null);
@@ -1566,30 +1576,32 @@ export const ManagerPortalView: React.FC = () => {
                               Publish
                             </button>
                           )}
-                          {t.trip_status !== 'CANCELLED' && t.trip_status !== 'COMPLETED' && (
+                          {['SCHEDULED', 'PUBLISHED'].includes(t.trip_status) && (
                             <button
-                              onClick={() => handleUpdateTripStatus(t.trip_id, 'CANCELLED')}
+                              onClick={() => handleCancelTrip(t.trip_id)}
                               className="px-2 py-1 bg-neutral-200 dark:bg-neutral-800 hover:bg-rose-100 hover:text-rose-700 rounded text-[10px]"
                             >
                               Cancel
                             </button>
                           )}
+                          {t.trip_status !== 'COMPLETED' && t.trip_status !== 'DELETED' && (
                           <button
                             type="button"
                             onClick={() => setDeleteConfirmModal({
                               isOpen: true,
-                              title: 'Cancel Trip',
-                              message: `Are you sure you want to cancel trip #${t.trip_id} (${t.route_name})?`,
-                              details: 'All confirmed bookings will be cancelled and seat reservations released. Passenger booking and check-in history will be preserved. The trip will remain in the system with CANCELLED status.',
+                              title: 'Delete Trip',
+                              message: `Remove trip #${t.trip_id} (${t.route_name}) from active scheduling?`,
+                              details: 'The trip will be marked DELETED and removed from student trip listings. Confirmed passenger bookings will be marked cancelled and seats released. The trip record, Booking IDs, student passes and check-in history will be retained in historical records. Completed trips cannot be deleted.',
                               itemType: 'trip',
                               itemId: t.trip_id,
                               itemName: `Trip #${t.trip_id} (${t.route_name})`,
                             })}
                             className="p-1 rounded text-neutral-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition-colors inline-flex items-center"
-                            title="Cancel Trip"
+                            title="Delete Trip"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+                          )}
                         </td>
                       </tr>
                     ))}

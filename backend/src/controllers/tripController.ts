@@ -30,7 +30,7 @@ export async function listTrips(req: Request, res: Response): Promise<void> {
     // Students should only see trips that are available to book. Managers retain
     // visibility of cancelled trips for operational history and review.
     if (req.user?.role !== 'MANAGER') {
-      query += ` AND t.trip_status <> 'CANCELLED'
+      query += ` AND t.trip_status NOT IN ('CANCELLED', 'DELETED')
                   AND r.status = 'ACTIVE'
                   AND c.status = 'ACTIVE'
                   AND b.status = 'ACTIVE'`;
@@ -105,6 +105,10 @@ export async function getTripById(req: Request, res: Response): Promise<void> {
     }
 
     const trip = tripRows[0];
+    if (trip.trip_status === 'DELETED' && req.user?.role !== 'MANAGER') {
+      res.status(404).json({ error: 'Trip not found.' });
+      return;
+    }
 
     // Fetch ordered route stops for boarding selection
     const [stops]: any = await pool.query(
@@ -317,8 +321,8 @@ export async function updateTrip(req: Request, res: Response): Promise<void> {
     res.status(400).json({ error: 'Invalid trip ID.' });
     return;
   }
-  if (tripStatus !== undefined && !['SCHEDULED', 'PUBLISHED', 'CANCELLED', 'COMPLETED'].includes(tripStatus)) {
-    res.status(400).json({ error: 'Invalid trip status.' });
+  if (tripStatus !== undefined && !['SCHEDULED', 'PUBLISHED', 'COMPLETED'].includes(tripStatus)) {
+    res.status(400).json({ error: 'Invalid trip status. Use the dedicated cancel action for CANCELLED; trips cannot be set to DELETED through update.' });
     return;
   }
   if (tripCategory !== undefined && !['STANDARD', 'EXTRA'].includes(tripCategory)) {
@@ -342,6 +346,11 @@ export async function updateTrip(req: Request, res: Response): Promise<void> {
     }
 
     const existing = existingRows[0];
+    if (existing.trip_status === 'DELETED') {
+      await connection.rollback(); transactionStarted = false;
+      res.status(409).json({ error: 'Deleted trips cannot be modified.' });
+      return;
+    }
     const nextBusId = busId ?? existing.bus_id;
     const nextDriverId = driverId === undefined ? existing.driver_id : (driverId || null);
     const nextStatus = tripStatus ?? existing.trip_status;
@@ -450,7 +459,7 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
       JOIN routes r ON t.route_id = r.route_id
       JOIN route_corridors c ON r.corridor_id = c.corridor_id
       WHERE t.direction = 'OUTBOUND'
-        AND t.trip_status != 'CANCELLED'
+        AND t.trip_status NOT IN ('CANCELLED', 'DELETED')
         AND t.trip_date >= CURRENT_DATE()
       ORDER BY t.trip_date ASC, c.corridor_name ASC
     `);
@@ -461,7 +470,7 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
       FROM trips t
       JOIN routes r ON t.route_id = r.route_id
       WHERE t.direction = 'RETURN'
-        AND t.trip_status != 'CANCELLED'
+        AND t.trip_status NOT IN ('CANCELLED', 'DELETED')
         AND t.trip_date >= CURRENT_DATE()
     `);
 
@@ -512,13 +521,13 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
   }
 }
 
+
 /**
- * DELETE /api/trips/:id
- * MANAGER only: Cancel or delete a scheduled trip.
+ * Shared trip lifecycle operation. Passenger booking and check-in rows are retained.
  */
-export async function deleteTrip(req: Request, res: Response): Promise<void> {
-  const tripId = parseInt(req.params.id, 10);
-  if (isNaN(tripId)) {
+async function transitionTrip(req: Request, res: Response, action: 'CANCELLED' | 'DELETED'): Promise<void> {
+  const tripId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
     res.status(400).json({ error: 'Invalid trip ID.' });
     return;
   }
@@ -528,60 +537,68 @@ export async function deleteTrip(req: Request, res: Response): Promise<void> {
   try {
     await connection.beginTransaction();
     transactionStarted = true;
-
-    // Lock the trip so a booking cannot be created while cancellation is in progress.
     const [trips]: any = await connection.query(
-      'SELECT trip_id, trip_status FROM trips WHERE trip_id = ? FOR UPDATE',
-      [tripId]
+      'SELECT trip_id, trip_status FROM trips WHERE trip_id = ? FOR UPDATE', [tripId]
     );
-    if (trips.length === 0) {
-      await connection.rollback();
-      transactionStarted = false;
-      res.status(404).json({ error: 'Trip not found.' });
-      return;
+    if (!trips.length) {
+      await connection.rollback(); transactionStarted = false;
+      res.status(404).json({ error: 'Trip not found.' }); return;
     }
 
-    // Preserve historical bookings and check-ins. Only confirmed bookings are cancelled.
+    const currentStatus = trips[0].trip_status;
+    if (currentStatus === 'DELETED') {
+      await connection.rollback(); transactionStarted = false;
+      res.status(409).json({ error: 'Trip #' + tripId + ' has already been deleted.' }); return;
+    }
+    if (currentStatus === 'COMPLETED') {
+      await connection.rollback(); transactionStarted = false;
+      res.status(409).json({ error: 'Completed trips are retained as historical records and cannot be deleted or cancelled.' }); return;
+    }
+    if (action === 'CANCELLED' && currentStatus === 'CANCELLED') {
+      await connection.commit(); transactionStarted = false;
+      res.json({ message: 'Trip #' + tripId + ' is already cancelled. Passenger history remains preserved.', action, tripId, cancelledBookings: 0, historyPreserved: true }); return;
+    }
+
     const [bookingRows]: any = await connection.query(
-      "SELECT COUNT(*) AS count FROM bookings WHERE trip_id = ? AND booking_status = 'CONFIRMED'",
-      [tripId]
+      "SELECT COUNT(*) AS count FROM bookings WHERE trip_id = ? AND booking_status = 'CONFIRMED'", [tripId]
     );
     const cancelledBookings = Number(bookingRows[0]?.count || 0);
 
-    // Preserve completed boarding/no-show history; mark remaining check-ins as cancelled prior.
     await connection.query(
       "UPDATE check_ins ci INNER JOIN bookings b ON b.booking_id = ci.booking_id SET ci.boarding_status = 'CANCELLED_PRIOR' WHERE b.trip_id = ? AND b.booking_status = 'CONFIRMED' AND ci.boarding_status NOT IN ('BOARDED', 'NO_SHOW')",
       [tripId]
     );
 
+    const reason = action === 'DELETED' ? 'Trip deleted by manager' : 'Trip cancelled by manager';
     await connection.query(
-      "UPDATE bookings SET booking_status = 'CANCELLED', cancelled_at = CURRENT_TIMESTAMP, cancellation_reason = 'Trip cancelled by manager' WHERE trip_id = ? AND booking_status = 'CONFIRMED'",
-      [tripId]
+      "UPDATE bookings SET booking_status = 'CANCELLED', cancelled_at = COALESCE(cancelled_at, CURRENT_TIMESTAMP), cancellation_reason = ? WHERE trip_id = ? AND booking_status = 'CONFIRMED'",
+      [reason, tripId]
     );
-
-    // Release active seat locks but retain booking and check-in audit records.
     await connection.query('DELETE FROM trip_seat_reservations WHERE trip_id = ?', [tripId]);
-    await connection.query("UPDATE trips SET trip_status = 'CANCELLED' WHERE trip_id = ?", [tripId]);
+    await connection.query('UPDATE trips SET trip_status = ? WHERE trip_id = ?', [action, tripId]);
 
     await connection.commit();
     transactionStarted = false;
-
+    const verb = action === 'DELETED' ? 'deleted' : 'cancelled';
     res.json({
-      message: 'Trip #' + tripId + ' has been cancelled. ' + cancelledBookings + ' confirmed booking(s) were cancelled, seat reservations were released, and passenger history was preserved.',
-      action: 'CANCELLED',
-      tripId,
-      cancelledBookings,
-      historyPreserved: true,
+      message: 'Trip #' + tripId + ' has been ' + verb + '. ' + cancelledBookings + ' confirmed booking(s) were marked cancelled, seat reservations were released, and passenger booking/check-in history was preserved.',
+      action, tripId, cancelledBookings, historyPreserved: true, tripRecordRetained: true,
     });
   } catch (error: any) {
-    if (transactionStarted) {
-      try { await connection.rollback(); } catch { /* preserve original error */ }
-    }
-    console.error('[TRIP_CANCEL_ERROR]', error);
-    res.status(500).json({
-      error: 'Failed to cancel trip #' + tripId + ': ' + (error.sqlMessage || error.message || 'Database error'),
-    });
+    if (transactionStarted) { try { await connection.rollback(); } catch { /* preserve original error */ } }
+    console.error('[TRIP_' + action + '_ERROR]', error);
+    res.status(500).json({ error: 'Failed to ' + action.toLowerCase() + ' trip #' + tripId + ': ' + (error.sqlMessage || error.message || 'Database error') });
   } finally {
     connection.release();
   }
+}
+
+/** POST /api/trips/:id/cancel — cancel while retaining cancelled trip history. */
+export async function cancelTrip(req: Request, res: Response): Promise<void> {
+  await transitionTrip(req, res, 'CANCELLED');
+}
+
+/** DELETE /api/trips/:id — soft-delete from operations, retaining the trip and passenger history. */
+export async function deleteTrip(req: Request, res: Response): Promise<void> {
+  await transitionTrip(req, res, 'DELETED');
 }

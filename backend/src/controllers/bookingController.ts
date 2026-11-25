@@ -303,7 +303,7 @@ export async function getBookingById(req: Request, res: Response): Promise<void>
     }
 
     // Boarding pass verification QR code payload
-    const isTripCancelled = booking.trip_status === 'CANCELLED';
+    const isTripCancelled = ['CANCELLED', 'DELETED'].includes(booking.trip_status);
     const isBookingCancelled = booking.booking_status === 'CANCELLED';
     const isValidPass = !isTripCancelled && !isBookingCancelled;
 

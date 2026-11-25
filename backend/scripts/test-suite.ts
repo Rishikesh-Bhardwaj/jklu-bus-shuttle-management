@@ -117,6 +117,7 @@ async function runTestSuite() {
   assert(!isTripBookable('SCHEDULED'), 'SCHEDULED trip is NOT bookable until published by manager');
   assert(!isTripBookable('CANCELLED'), 'CANCELLED trip rejects booking');
   assert(!isTripBookable('COMPLETED'), 'COMPLETED trip rejects booking');
+  assert(!isTripBookable('DELETED'), 'DELETED trip rejects booking');
 
   function calculateAvailableSeats(totalSeats: number, bookedSeats: number): number {
     return Math.max(0, totalSeats - bookedSeats);
@@ -166,9 +167,8 @@ async function runTestSuite() {
   function canCreateTrip(resourceStatuses: ResourceStatus[]): boolean {
     return resourceStatuses.every((status) => status === 'ACTIVE');
   }
-  function deleteTripAction(): { action: 'CANCELLED'; preservesTrip: true; preservesPassengerHistory: true } {
-    return { action: 'CANCELLED', preservesTrip: true, preservesPassengerHistory: true };
-  }
+  function cancelTripAction() { return { action: 'CANCELLED', preservesTrip: true, preservesPassengerHistory: true }; }
+  function deleteTripAction() { return { action: 'DELETED', preservesTrip: true, preservesPassengerHistory: true, removesFromStudentSchedule: true, retainsCancelledPass: true }; }
 
   assert(!canChangeStatus(1), 'Blocks activation/deactivation while a scheduled or published trip references a resource');
   assert(canChangeStatus(0), 'Allows status changes when no active trip references the resource');
@@ -178,8 +178,10 @@ async function runTestSuite() {
   assert(canCreateTrip(['ACTIVE', 'ACTIVE', 'ACTIVE']), 'Allows trip creation when every referenced resource is active');
   assert(!canCreateTrip(['ACTIVE', 'INACTIVE', 'ACTIVE']), 'Rejects trip creation when any referenced resource is inactive');
   assert(!canCreateTrip(['ACTIVE', 'RETIRED']), 'Rejects trip creation when a bus is retired');
-  assert(deleteTripAction().action === 'CANCELLED', 'Trip DELETE endpoint cancels rather than physically deleting a trip');
-  assert(deleteTripAction().preservesTrip && deleteTripAction().preservesPassengerHistory, 'Trip cancellation preserves trip and passenger audit records');
+  assert(cancelTripAction().action === 'CANCELLED', 'Cancel action marks the trip CANCELLED and retains it in cancelled trip history');
+  assert(deleteTripAction().action === 'DELETED', 'Delete action marks the trip DELETED, distinct from cancellation');
+  assert(deleteTripAction().preservesTrip && deleteTripAction().preservesPassengerHistory, 'Trip deletion retains the trip row, passenger bookings, and check-in audit records');
+  assert(deleteTripAction().removesFromStudentSchedule && deleteTripAction().retainsCancelledPass, 'Deleted trip disappears from student schedules but remains visible in cancelled-pass history');
 
   // Deletion dependencies must be presented to the manager, not cascaded away.
   function deletionResolution(dependencies: { trips: number; routes: number; stops: number; bookings: number }) {
