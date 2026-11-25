@@ -580,7 +580,7 @@ export const ManagerPortalView: React.FC = () => {
         loadRoutesAndStops();
       } else if (itemType === 'trip') {
         res = await apiRequest(`/trips/${itemId}`, { method: 'DELETE' });
-        setBannerSuccess(res.message || `Trip #${itemId} deleted. Passenger history preserved.`);
+        setBannerSuccess(res.message || `Trip #${itemId} deleted and removed from the website. Passenger history is preserved.`);
         loadTrips();
       }
       setDeleteConfirmModal(null);
