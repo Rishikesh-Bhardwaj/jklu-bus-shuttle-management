@@ -243,6 +243,11 @@ export const TripsView: React.FC<TripsViewProps> = ({ setCurrentView, initialCat
                     </span>
                   </div>
 
+                  {/* Trip ID */}
+                  <div className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
+                    Trip ID: <span className="font-bold text-neutral-800 dark:text-neutral-200">#{trip.trip_id}</span>
+                  </div>
+
                   {/* Route & Corridor */}
                   <div>
                     <h3 className="font-bold text-sm text-neutral-900 dark:text-neutral-100">
