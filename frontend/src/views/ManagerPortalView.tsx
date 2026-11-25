@@ -76,6 +76,8 @@ export const ManagerPortalView: React.FC = () => {
   const [manifestRows, setManifestRows] = useState<any[]>([]);
   const [manifestSummary, setManifestSummary] = useState<any | null>(null);
   const [loadingManifest, setLoadingManifest] = useState<boolean>(false);
+  const [busQrToken, setBusQrToken] = useState<string | null>(null);
+  const [generatingBusQr, setGeneratingBusQr] = useState<boolean>(false);
 
   // Tab 6: Feedback Moderation State
   const [adminFeedback, setAdminFeedback] = useState<any[]>([]);
@@ -423,6 +425,21 @@ export const ManagerPortalView: React.FC = () => {
   // -------------------------------------------------------------
   // Manifest / Check-In Handlers
   // -------------------------------------------------------------
+  const handleGenerateBusQr = async () => {
+    if (!selectedManifestTripId) return;
+    try {
+      setGeneratingBusQr(true);
+      setBusQrToken(null);
+      const data = await apiRequest(`/check-ins/trips/${selectedManifestTripId}/qr`, { method: 'POST' });
+      setBusQrToken(data.token);
+      setBannerSuccess('Bus check-in QR generated. It expires in 2 minutes; refresh it when needed.');
+    } catch (err: any) {
+      setBannerError(err.message || 'Failed to generate the bus check-in QR.');
+    } finally {
+      setGeneratingBusQr(false);
+    }
+  };
+
   const handleBoardPassenger = async (bookingId: number) => {
     try {
       await apiRequest(`/check-ins/${bookingId}/board`, { method: 'POST' });
@@ -1542,6 +1559,33 @@ export const ManagerPortalView: React.FC = () => {
               </select>
             </div>
           </div>
+
+          {selectedManifestTripId && (
+            <div className="p-5 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-sm flex flex-col sm:flex-row items-center gap-4">
+              <div className="flex-1">
+                <h4 className="font-bold text-sm text-neutral-900 dark:text-neutral-100">Bus QR Self Check-In</h4>
+                <p className="text-xs text-neutral-500 mt-1">Display this QR on the bus. Students scan it from My Passes while signed in; confirmed bookings are checked in automatically. The code expires after 2 minutes.</p>
+                <button
+                  type="button"
+                  onClick={handleGenerateBusQr}
+                  disabled={generatingBusQr}
+                  className="mt-3 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-semibold"
+                >
+                  {generatingBusQr ? 'Generating…' : busQrToken ? 'Refresh Bus QR' : 'Generate Bus QR'}
+                </button>
+              </div>
+              {busQrToken && (
+                <div className="text-center">
+                  <img
+                    src={`https://quickchart.io/qr?size=220&text=${encodeURIComponent(busQrToken)}`}
+                    alt="Temporary bus check-in QR code"
+                    className="w-44 h-44 border rounded-lg bg-white p-2"
+                  />
+                  <p className="text-[10px] text-amber-600 font-semibold mt-1">Valid for 2 minutes</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {selectedManifestTripId && manifestSummary && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
