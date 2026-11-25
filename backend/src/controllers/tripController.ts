@@ -105,6 +105,10 @@ export async function getTripById(req: Request, res: Response): Promise<void> {
     }
 
     const trip = tripRows[0];
+    if (trip.trip_status === 'DELETED' && req.user?.role !== 'MANAGER') {
+      res.status(404).json({ error: 'Trip not found.' });
+      return;
+    }
 
     // Fetch ordered route stops for boarding selection
     const [stops]: any = await pool.query(
@@ -342,6 +346,11 @@ export async function updateTrip(req: Request, res: Response): Promise<void> {
     }
 
     const existing = existingRows[0];
+    if (existing.trip_status === 'DELETED') {
+      await connection.rollback(); transactionStarted = false;
+      res.status(409).json({ error: 'Deleted trips cannot be modified.' });
+      return;
+    }
     const nextBusId = busId ?? existing.bus_id;
     const nextDriverId = driverId === undefined ? existing.driver_id : (driverId || null);
     const nextStatus = tripStatus ?? existing.trip_status;
@@ -461,7 +470,7 @@ export async function returnServiceAuditCheck(req: Request, res: Response): Prom
       FROM trips t
       JOIN routes r ON t.route_id = r.route_id
       WHERE t.direction = 'RETURN'
-        AND t.trip_status != 'CANCELLED'
+        AND t.trip_status NOT IN ('CANCELLED', 'DELETED')
         AND t.trip_date >= CURRENT_DATE()
     `);
 
