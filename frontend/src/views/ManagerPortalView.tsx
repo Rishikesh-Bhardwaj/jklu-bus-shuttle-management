@@ -78,6 +78,7 @@ export const ManagerPortalView: React.FC = () => {
   const [manifestSummary, setManifestSummary] = useState<any | null>(null);
   const [loadingManifest, setLoadingManifest] = useState<boolean>(false);
   const [busQrToken, setBusQrToken] = useState<string | null>(null);
+  const [busQrExpiresAt, setBusQrExpiresAt] = useState<number | null>(null);
   const [generatingBusQr, setGeneratingBusQr] = useState<boolean>(false);
 
   // Tab 6: Feedback Moderation State
@@ -184,6 +185,37 @@ export const ManagerPortalView: React.FC = () => {
       setBannerError(err.message || 'Failed to load feedback for admin.');
     }
   };
+
+  // Restore the same one-hour bus QR when returning to this trip or reloading the manager portal.
+  useEffect(() => {
+    if (!selectedManifestTripId) {
+      setBusQrToken(null);
+      setBusQrExpiresAt(null);
+      return;
+    }
+    const storageKey = `jklu-bus-checkin-qr-${selectedManifestTripId}`;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (!saved) {
+        setBusQrToken(null);
+        setBusQrExpiresAt(null);
+        return;
+      }
+      const cached = JSON.parse(saved);
+      if (typeof cached.token === 'string' && Number(cached.expiresAt) > Date.now()) {
+        setBusQrToken(cached.token);
+        setBusQrExpiresAt(Number(cached.expiresAt));
+      } else {
+        localStorage.removeItem(storageKey);
+        setBusQrToken(null);
+        setBusQrExpiresAt(null);
+      }
+    } catch {
+      localStorage.removeItem(storageKey);
+      setBusQrToken(null);
+      setBusQrExpiresAt(null);
+    }
+  }, [selectedManifestTripId]);
 
   // Initial tab loading trigger
   useEffect(() => {
@@ -429,12 +461,27 @@ export const ManagerPortalView: React.FC = () => {
   // -------------------------------------------------------------
   const handleGenerateBusQr = async () => {
     if (!selectedManifestTripId) return;
+    const storageKey = `jklu-bus-checkin-qr-${selectedManifestTripId}`;
     try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const cached = JSON.parse(saved);
+        if (typeof cached.token === 'string' && Number(cached.expiresAt) > Date.now()) {
+          setBusQrToken(cached.token);
+          setBusQrExpiresAt(Number(cached.expiresAt));
+          setBannerSuccess('The existing bus QR is still active. Keep displaying the same code until it expires.');
+          return;
+        }
+        localStorage.removeItem(storageKey);
+      }
+
       setGeneratingBusQr(true);
-      setBusQrToken(null);
       const data = await apiRequest(`/check-ins/trips/${selectedManifestTripId}/qr`, { method: 'POST' });
+      const expiresAt = Date.now() + Number(data.expiresInSeconds || 3600) * 1000;
       setBusQrToken(data.token);
-      setBannerSuccess('Bus check-in QR generated. It expires in 1 hour; refresh it when needed.');
+      setBusQrExpiresAt(expiresAt);
+      localStorage.setItem(storageKey, JSON.stringify({ token: data.token, expiresAt }));
+      setBannerSuccess('Bus check-in QR generated. This same QR remains available for 1 hour; you do not need to regenerate it.');
     } catch (err: any) {
       setBannerError(err.message || 'Failed to generate the bus check-in QR.');
     } finally {
@@ -1643,7 +1690,7 @@ export const ManagerPortalView: React.FC = () => {
                   disabled={generatingBusQr}
                   className="mt-3 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-semibold"
                 >
-                  {generatingBusQr ? 'Generating…' : busQrToken ? 'Refresh Bus QR' : 'Generate Bus QR'}
+                  {generatingBusQr ? 'Generating…' : busQrToken && busQrExpiresAt && busQrExpiresAt > Date.now() ? 'QR Active — Reuse This Code' : 'Generate Bus QR'}
                 </button>
               </div>
               {busQrToken && (
@@ -1653,7 +1700,7 @@ export const ManagerPortalView: React.FC = () => {
                     alt="Temporary bus check-in QR code"
                     className="w-44 h-44 border rounded-lg bg-white p-2"
                   />
-                  <p className="text-[10px] text-amber-600 font-semibold mt-1">Valid for 1 hour</p>
+                  <p className="text-[10px] text-amber-600 font-semibold mt-1">Valid until {busQrExpiresAt ? new Date(busQrExpiresAt).toLocaleTimeString() : 'expiry'} — keep using this same QR</p>
                 </div>
               )}
             </div>
