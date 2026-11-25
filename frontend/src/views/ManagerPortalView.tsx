@@ -73,6 +73,7 @@ export const ManagerPortalView: React.FC = () => {
 
   // Tab 5: Manifest & Check-In State
   const [selectedManifestTripId, setSelectedManifestTripId] = useState<number | ''>('');
+  const [manifestTripSearch, setManifestTripSearch] = useState<string>('');
   const [manifestRows, setManifestRows] = useState<any[]>([]);
   const [manifestSummary, setManifestSummary] = useState<any | null>(null);
   const [loadingManifest, setLoadingManifest] = useState<boolean>(false);
@@ -1541,14 +1542,58 @@ export const ManagerPortalView: React.FC = () => {
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch gap-2 w-full sm:w-auto">
+              <form
+                className="flex items-center gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const searchedId = Number(manifestTripSearch.trim());
+                  const matchingTrip = trips.find((trip) => Number(trip.trip_id) === searchedId);
+                  if (!manifestTripSearch.trim() || !Number.isInteger(searchedId) || searchedId <= 0) {
+                    setBannerError('Enter a valid Trip ID to search.');
+                    return;
+                  }
+                  if (!matchingTrip) {
+                    setBannerError(`Trip #${manifestTripSearch.trim()} was not found.`);
+                    return;
+                  }
+                  setBannerError(null);
+                  setSelectedManifestTripId(searchedId);
+                  setBusQrToken(null);
+                  loadManifest(searchedId);
+                }}
+              >
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={manifestTripSearch}
+                  onChange={(e) => setManifestTripSearch(e.target.value)}
+                  placeholder="Search by Trip ID"
+                  aria-label="Search passenger manifest by Trip ID"
+                  className="w-full sm:w-40 px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white font-semibold"
+                >
+                  Search
+                </button>
+              </form>
               <select
                 value={selectedManifestTripId}
                 onChange={(e) => {
-                  setSelectedManifestTripId(e.target.value ? parseInt(e.target.value, 10) : '');
-                  if (e.target.value) loadManifest(parseInt(e.target.value, 10));
+                  const tripId = e.target.value ? parseInt(e.target.value, 10) : '';
+                  setSelectedManifestTripId(tripId);
+                  setManifestTripSearch(tripId ? String(tripId) : '');
+                  setBusQrToken(null);
+                  if (tripId) loadManifest(tripId);
+                  else {
+                    setManifestRows([]);
+                    setManifestSummary(null);
+                  }
                 }}
-                className="px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100"
+                className="w-full sm:w-auto px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100"
               >
                 <option value="">Select Scheduled Trip</option>
                 {trips.map((t) => (
