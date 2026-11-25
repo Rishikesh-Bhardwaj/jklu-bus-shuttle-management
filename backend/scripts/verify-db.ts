@@ -167,6 +167,32 @@ async function verifyDatabase() {
       }
     }
 
+    // 2d. Resource lifecycle status columns must exist with the exact policy enum.
+    console.log('Verifying resource lifecycle status columns...');
+    const [lifecycleColumns]: any = await connection.query(
+      `SELECT TABLE_NAME, COLUMN_TYPE, DATA_TYPE, COLLATION_NAME, IS_NULLABLE, COLUMN_DEFAULT
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND COLUMN_NAME = 'status'
+         AND TABLE_NAME IN ('route_corridors', 'routes', 'stops')`,
+      [database]
+    );
+    const lifecycleMap = new Map<string, any>(lifecycleColumns.map((column: any) => [column.TABLE_NAME, column]));
+    for (const tableName of ['route_corridors', 'routes', 'stops']) {
+      const column = lifecycleMap.get(tableName);
+      if (
+        !column ||
+        column.DATA_TYPE !== 'enum' ||
+        column.COLUMN_TYPE !== "enum('ACTIVE','INACTIVE')" ||
+        column.COLLATION_NAME !== 'utf8mb4_unicode_ci' ||
+        column.IS_NULLABLE !== 'NO' ||
+        column.COLUMN_DEFAULT !== 'ACTIVE'
+      ) {
+        errors.push(`Missing or invalid ${tableName}.status lifecycle column: ${JSON.stringify(column)}`);
+      } else {
+        console.log(`  ✓ PASS: ${tableName}.status uses ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE'.`);
+      }
+    }
+
     // Check schema_migrations row count
     try {
       const [migCnt]: any = await connection.query('SELECT COUNT(*) AS total FROM schema_migrations');
