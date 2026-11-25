@@ -432,7 +432,7 @@ export const ManagerPortalView: React.FC = () => {
       setBusQrToken(null);
       const data = await apiRequest(`/check-ins/trips/${selectedManifestTripId}/qr`, { method: 'POST' });
       setBusQrToken(data.token);
-      setBannerSuccess('Bus check-in QR generated. It expires in 2 minutes; refresh it when needed.');
+      setBannerSuccess('Bus check-in QR generated. It expires in 1 hour; refresh it when needed.');
     } catch (err: any) {
       setBannerError(err.message || 'Failed to generate the bus check-in QR.');
     } finally {
@@ -1564,7 +1564,7 @@ export const ManagerPortalView: React.FC = () => {
             <div className="p-5 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-sm flex flex-col sm:flex-row items-center gap-4">
               <div className="flex-1">
                 <h4 className="font-bold text-sm text-neutral-900 dark:text-neutral-100">Bus QR Self Check-In</h4>
-                <p className="text-xs text-neutral-500 mt-1">Display this QR on the bus. Students scan it from My Passes while signed in; confirmed bookings are checked in automatically. The code expires after 2 minutes.</p>
+                <p className="text-xs text-neutral-500 mt-1">Display this QR on the bus. Students scan it from My Passes while signed in; confirmed bookings are checked in automatically. The code expires after 1 hour.</p>
                 <button
                   type="button"
                   onClick={handleGenerateBusQr}
@@ -1581,7 +1581,7 @@ export const ManagerPortalView: React.FC = () => {
                     alt="Temporary bus check-in QR code"
                     className="w-44 h-44 border rounded-lg bg-white p-2"
                   />
-                  <p className="text-[10px] text-amber-600 font-semibold mt-1">Valid for 2 minutes</p>
+                  <p className="text-[10px] text-amber-600 font-semibold mt-1">Valid for 1 hour</p>
                 </div>
               )}
             </div>
