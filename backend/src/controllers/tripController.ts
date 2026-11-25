@@ -186,94 +186,123 @@ export async function getTripById(req: Request, res: Response): Promise<void> {
  * MANAGER only: Schedule a new trip.
  */
 export async function createTrip(req: Request, res: Response): Promise<void> {
+  const {
+    routeId, direction, busId, driverId, tripDate, departureTime,
+    estimatedArrivalTime, tripCategory = 'STANDARD', tripStatus = 'SCHEDULED',
+  } = req.body;
+
+  if (!routeId || !direction || !busId || !tripDate || !departureTime) {
+    res.status(400).json({
+      error: 'routeId, direction, busId, tripDate, and departureTime are required.',
+    });
+    return;
+  }
+  if (!['OUTBOUND', 'RETURN'].includes(direction) ||
+      !['STANDARD', 'EXTRA'].includes(tripCategory) ||
+      !['SCHEDULED', 'PUBLISHED'].includes(tripStatus)) {
+    res.status(400).json({ error: 'Invalid direction, trip category, or initial trip status.' });
+    return;
+  }
+
+  const connection = await pool.getConnection();
+  let transactionStarted = false;
   try {
-    const {
-      routeId,
-      direction,
-      busId,
-      driverId,
-      tripDate,
-      departureTime,
-      estimatedArrivalTime,
-      tripCategory = 'STANDARD',
-      tripStatus = 'SCHEDULED',
-    } = req.body;
+    await connection.beginTransaction();
+    transactionStarted = true;
 
-    if (!routeId || !direction || !busId || !tripDate || !departureTime) {
-      res.status(400).json({
-        error: 'routeId, direction, busId, tripDate, and departureTime are required.',
-      });
-      return;
-    }
-
-    // Refuse to schedule trips with inactive resources.
-    const [routeCheck]: any = await pool.query(
-      `SELECT r.route_id, r.direction, r.status AS route_status,
-              c.status AS corridor_status
-       FROM routes r JOIN route_corridors c ON c.corridor_id = r.corridor_id
-       WHERE r.route_id = ? AND r.direction = ?`,
-      [routeId, direction]
+    // Read the corridor ID, then lock all referenced resources in a consistent order.
+    const [routeInfo]: any = await connection.query(
+      'SELECT corridor_id FROM routes WHERE route_id = ?',
+      [routeId]
     );
-    if (routeCheck.length === 0) {
-      res.status(400).json({ error: `Route ${routeId} does not match direction ${direction}.` });
+    if (!routeInfo.length) {
+      await connection.rollback(); transactionStarted = false;
+      res.status(400).json({ error: `Route ${routeId} does not exist.` });
       return;
     }
-    if (routeCheck[0].route_status !== 'ACTIVE' || routeCheck[0].corridor_status !== 'ACTIVE') {
-      res.status(409).json({ error: 'Cannot schedule a trip on an inactive route or corridor.' });
+    const corridorId = routeInfo[0].corridor_id;
+
+    const [corridors]: any = await connection.query(
+      "SELECT corridor_id, status FROM route_corridors WHERE corridor_id = ? FOR UPDATE",
+      [corridorId]
+    );
+    if (!corridors.length || corridors[0].status !== 'ACTIVE') {
+      await connection.rollback(); transactionStarted = false;
+      res.status(409).json({ error: 'Cannot schedule a trip on an inactive or unavailable corridor.' });
       return;
     }
 
-    const [busCheck]: any = await pool.query('SELECT status FROM buses WHERE bus_id = ?', [busId]);
-    if (!busCheck.length || busCheck[0].status !== 'ACTIVE') {
+    const [routes]: any = await connection.query(
+      "SELECT route_id, corridor_id, direction, status FROM routes WHERE route_id = ? FOR UPDATE",
+      [routeId]
+    );
+    if (!routes.length || Number(routes[0].corridor_id) !== Number(corridorId) ||
+        routes[0].direction !== direction || routes[0].status !== 'ACTIVE') {
+      await connection.rollback(); transactionStarted = false;
+      res.status(409).json({ error: 'Cannot schedule a trip: the route is missing, inactive, or does not match the selected direction.' });
+      return;
+    }
+
+    const [buses]: any = await connection.query(
+      'SELECT bus_id, status FROM buses WHERE bus_id = ? FOR UPDATE',
+      [busId]
+    );
+    if (!buses.length || buses[0].status !== 'ACTIVE') {
+      await connection.rollback(); transactionStarted = false;
       res.status(409).json({ error: 'Cannot schedule a trip with an inactive or unavailable bus.' });
       return;
     }
 
     if (driverId) {
-      const [driverCheck]: any = await pool.query('SELECT status FROM drivers WHERE driver_id = ?', [driverId]);
-      if (!driverCheck.length || driverCheck[0].status !== 'ACTIVE') {
+      const [drivers]: any = await connection.query(
+        'SELECT driver_id, status FROM drivers WHERE driver_id = ? FOR UPDATE',
+        [driverId]
+      );
+      if (!drivers.length || drivers[0].status !== 'ACTIVE') {
+        await connection.rollback(); transactionStarted = false;
         res.status(409).json({ error: 'Cannot schedule a trip with an inactive or unavailable driver.' });
         return;
       }
     }
 
-    const [inactiveStops]: any = await pool.query(
-      `SELECT s.stop_id, s.stop_name
-       FROM route_stops rs JOIN stops s ON s.stop_id = rs.stop_id
-       WHERE rs.route_id = ? AND s.status <> 'ACTIVE'`,
+    const [routeStops]: any = await connection.query(
+      'SELECT stop_id FROM route_stops WHERE route_id = ? ORDER BY stop_id ASC',
       [routeId]
     );
-    if (inactiveStops.length) {
-      res.status(409).json({
-        error: 'Cannot schedule a trip because this route contains inactive stops.',
-        dependencies: { stops: inactiveStops },
-      });
-      return;
+    const stopIds = routeStops.map((row: any) => Number(row.stop_id)).sort((a: number, b: number) => a - b);
+    for (const stopId of stopIds) {
+      const [stops]: any = await connection.query(
+        'SELECT stop_id, status FROM stops WHERE stop_id = ? FOR UPDATE',
+        [stopId]
+      );
+      if (!stops.length || stops[0].status !== 'ACTIVE') {
+        await connection.rollback(); transactionStarted = false;
+        res.status(409).json({
+          error: 'Cannot schedule a trip because this route contains an inactive or unavailable stop.',
+          dependencies: { stops: [{ stop_id: stopId }] },
+        });
+        return;
+      }
     }
 
-    const [result]: any = await pool.query(
+    const [result]: any = await connection.query(
       `INSERT INTO trips (route_id, direction, bus_id, driver_id, trip_date, departure_time, estimated_arrival_time, trip_category, trip_status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        routeId,
-        direction,
-        busId,
-        driverId || null,
-        tripDate,
-        departureTime,
-        estimatedArrivalTime || null,
-        tripCategory,
-        tripStatus,
-      ]
+      [routeId, direction, busId, driverId || null, tripDate, departureTime,
+       estimatedArrivalTime || null, tripCategory, tripStatus]
     );
 
-    res.status(201).json({
-      message: 'Trip scheduled successfully.',
-      tripId: result.insertId,
-    });
+    await connection.commit();
+    transactionStarted = false;
+    res.status(201).json({ message: 'Trip scheduled successfully.', tripId: result.insertId });
   } catch (error: any) {
+    if (transactionStarted) {
+      try { await connection.rollback(); } catch { /* preserve original error */ }
+    }
     console.error('[TRIP_CREATE_ERROR]', error);
     res.status(500).json({ error: 'Failed to schedule trip.' });
+  } finally {
+    connection.release();
   }
 }
 
