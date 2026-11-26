@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/db.js';
+import { isPassengerTripResourceAvailable } from '../utils/resourceLifecyclePolicy.js';
 
 /**
  * GET /api/trips
@@ -33,7 +34,13 @@ export async function listTrips(req: Request, res: Response): Promise<void> {
       query += ` AND t.trip_status NOT IN ('CANCELLED', 'DELETED')
                   AND r.status = 'ACTIVE'
                   AND c.status = 'ACTIVE'
-                  AND b.status = 'ACTIVE'`;
+                  AND b.status = 'ACTIVE'
+                  AND (d.driver_id IS NULL OR d.status = 'ACTIVE')
+                  AND EXISTS (
+                    SELECT 1 FROM route_stops rs
+                    JOIN stops s ON s.stop_id = rs.stop_id
+                    WHERE rs.route_id = t.route_id AND s.status = 'ACTIVE'
+                  )`;
     }
 
     if (date) {
@@ -89,7 +96,9 @@ export async function getTripById(req: Request, res: Response): Promise<void> {
               r.route_name, r.origin, r.destination,
               c.corridor_id, c.corridor_name,
               b.bus_no, b.total_no_of_seats,
-              d.driver_name, d.phone_number AS driver_phone
+              d.driver_name, d.phone_number AS driver_phone,
+              r.status AS route_status, c.status AS corridor_status,
+              b.status AS bus_status, d.status AS driver_status
        FROM trips t
        JOIN routes r ON t.route_id = r.route_id
        JOIN route_corridors c ON r.corridor_id = c.corridor_id
@@ -110,13 +119,23 @@ export async function getTripById(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Fetch ordered route stops for boarding selection
+    if (req.user?.role !== 'MANAGER' && !isPassengerTripResourceAvailable({
+      routeStatus: trip.route_status,
+      corridorStatus: trip.corridor_status,
+      busStatus: trip.bus_status,
+      driverStatus: trip.driver_status,
+    })) {
+      res.status(404).json({ error: 'Trip not found.' });
+      return;
+    }
+
+    // Passengers can only choose active boarding stops. Managers retain the full route view.
     const [stops]: any = await pool.query(
       `SELECT rs.route_stop_id, rs.stop_id, rs.stop_order, rs.estimated_offset_minutes,
-              s.stop_name
+              s.stop_name, s.status
        FROM route_stops rs
        JOIN stops s ON rs.stop_id = s.stop_id
-       WHERE rs.route_id = ?
+       WHERE rs.route_id = ? ${req.user?.role === 'MANAGER' ? '' : "AND s.status = 'ACTIVE'"}
        ORDER BY rs.stop_order ASC`,
       [trip.route_id]
     );

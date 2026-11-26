@@ -1106,7 +1106,7 @@ export const ManagerPortalView: React.FC = () => {
               {corridors.map((c) => (
                 <div key={c.corridor_id} className="p-2 bg-neutral-50 dark:bg-neutral-950 rounded font-medium flex items-center justify-between">
                   <span>{c.corridor_name}</span>
-                  <button type="button" onClick={() => handleResourceStatusToggle('corridor', c.corridor_id, c.status || 'ACTIVE', `Corridor ${c.corridor_name}`)} disabled={updatingResourceKey === 'corridor-' + c.corridor_id} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{c.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
+                  {c.status === 'INACTIVE' && <button type="button" onClick={() => handleResourceStatusToggle('corridor', c.corridor_id, c.status, `Corridor ${c.corridor_name}`)} disabled={updatingResourceKey === 'corridor-' + c.corridor_id} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">Activate</button>}
                 </div>
               ))}
             </div>
@@ -1142,7 +1142,7 @@ export const ManagerPortalView: React.FC = () => {
               {stops.map((s) => (
                 <div key={s.stop_id} className="p-1.5 bg-neutral-50 dark:bg-neutral-950 rounded text-[11px] flex items-center justify-between">
                   <span>{s.stop_name}</span>
-                  <button type="button" onClick={() => handleResourceStatusToggle('stop', s.stop_id, s.status || 'ACTIVE', `Stop ${s.stop_name}`)} disabled={updatingResourceKey === 'stop-' + s.stop_id} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{s.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
+                  {s.status === 'INACTIVE' && <button type="button" onClick={() => handleResourceStatusToggle('stop', s.stop_id, s.status, `Stop ${s.stop_name}`)} disabled={updatingResourceKey === 'stop-' + s.stop_id} className="px-2 py-1 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">Activate</button>}
                 </div>
               ))}
             </div>
@@ -1300,7 +1300,7 @@ export const ManagerPortalView: React.FC = () => {
                           {r.origin} → {r.destination}
                         </td>
                         <td className="p-2.5 text-right">
-                          <button type="button" onClick={() => handleResourceStatusToggle('route', r.route_id, r.status || 'ACTIVE', `Route ${r.route_name}`)} disabled={updatingResourceKey === 'route-' + r.route_id} className="px-2 py-1 mr-2 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">{r.status === 'INACTIVE' ? 'Activate' : 'Deactivate'}</button>
+                          {r.status === 'INACTIVE' && <button type="button" onClick={() => handleResourceStatusToggle('route', r.route_id, r.status, `Route ${r.route_name}`)} disabled={updatingResourceKey === 'route-' + r.route_id} className="px-2 py-1 mr-2 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800">Activate</button>}
                         </td>
                       </tr>
                     ))}

@@ -4,6 +4,8 @@
  * ascending row-lock deadlock prevention, booking integrity, and flexible return trip scheduling.
  */
 
+import { shouldCheckTripDependenciesForStatusChange, isPassengerTripResourceAvailable, isPassengerStopAvailable } from '../src/utils/resourceLifecyclePolicy.js';
+
 import {
   hashPassword,
   verifyPassword,
@@ -158,8 +160,8 @@ async function runTestSuite() {
   console.log('\n[8/8] Resource Lifecycle Policy & Data Preservation:');
 
   type ResourceStatus = 'ACTIVE' | 'INACTIVE' | 'RETIRED' | 'MAINTENANCE';
-  function canChangeStatus(activeTripCount: number): boolean {
-    return activeTripCount === 0;
+  function canChangeStatus(type: 'bus' | 'driver' | 'route' | 'stop' | 'corridor', currentStatus: ResourceStatus, nextStatus: ResourceStatus, activeTripCount: number): boolean {
+    return !shouldCheckTripDependenciesForStatusChange(type, currentStatus, nextStatus) || activeTripCount === 0;
   }
   function canPermanentlyDelete(totalTripReferences: number, otherDependencies: number): boolean {
     return totalTripReferences === 0 && otherDependencies === 0;
@@ -170,8 +172,19 @@ async function runTestSuite() {
   function cancelTripAction() { return { action: 'CANCELLED', preservesTrip: true, preservesPassengerHistory: true }; }
   function deleteTripAction() { return { action: 'DELETED', preservesTrip: true, preservesPassengerHistory: true, removesFromStudentSchedule: true, retainsCancelledPass: true }; }
 
-  assert(!canChangeStatus(1), 'Blocks activation/deactivation while a scheduled or published trip references a resource');
-  assert(canChangeStatus(0), 'Allows status changes when no active trip references the resource');
+  assert(!canChangeStatus('bus', 'ACTIVE', 'RETIRED', 1), 'Blocks bus deactivation while scheduled or published trips reference it');
+  assert(!canChangeStatus('driver', 'ACTIVE', 'INACTIVE', 1), 'Blocks driver deactivation while scheduled or published trips reference it');
+  assert(!canChangeStatus('stop', 'ACTIVE', 'INACTIVE', 1), 'Blocks stop deactivation while scheduled or published trips reference it');
+  assert(canChangeStatus('route', 'ACTIVE', 'INACTIVE', 1), 'Allows route deactivation without deleting referenced trips');
+  assert(canChangeStatus('corridor', 'ACTIVE', 'INACTIVE', 1), 'Allows corridor deactivation without deleting referenced trips');
+  assert(canChangeStatus('bus', 'RETIRED', 'ACTIVE', 1), 'Allows reactivation even when scheduled or published trips reference the resource');
+  assert(canChangeStatus('route', 'INACTIVE', 'ACTIVE', 1), 'Allows route reactivation even when trips reference it');
+  assert(canChangeStatus('bus', 'ACTIVE', 'RETIRED', 0), 'Allows fleet deactivation when no active trips reference it');
+  assert(isPassengerTripResourceAvailable({routeStatus:'ACTIVE',corridorStatus:'ACTIVE',busStatus:'ACTIVE',driverStatus:null}), 'Allows passenger access when required resources are active and no driver is assigned');
+  assert(!isPassengerTripResourceAvailable({routeStatus:'INACTIVE',corridorStatus:'ACTIVE',busStatus:'ACTIVE',driverStatus:'ACTIVE'}), 'Blocks passenger access to trips on inactive routes');
+  assert(!isPassengerTripResourceAvailable({routeStatus:'ACTIVE',corridorStatus:'INACTIVE',busStatus:'ACTIVE',driverStatus:'ACTIVE'}), 'Blocks passenger access to trips on inactive corridors');
+  assert(!isPassengerTripResourceAvailable({routeStatus:'ACTIVE',corridorStatus:'ACTIVE',busStatus:'ACTIVE',driverStatus:'INACTIVE'}), 'Blocks passenger access to trips with inactive assigned drivers');
+  assert(isPassengerStopAvailable('ACTIVE') && !isPassengerStopAvailable('INACTIVE'), 'Only active boarding stops are available to passengers');
   assert(!canPermanentlyDelete(1, 0), 'Blocks permanent deletion while any historical trip reference remains');
   assert(!canPermanentlyDelete(0, 1), 'Blocks permanent deletion while route, stop, booking, or other dependencies remain');
   assert(canPermanentlyDelete(0, 0), 'Allows permanent deletion only after every dependency is manually resolved');

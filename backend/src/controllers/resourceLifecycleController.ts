@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/db.js';
+import { shouldCheckTripDependenciesForStatusChange } from '../utils/resourceLifecyclePolicy.js';
 
 type ResourceType = 'bus' | 'driver' | 'route' | 'stop' | 'corridor';
 const validType = (value: string): value is ResourceType =>
@@ -42,12 +43,12 @@ export async function updateResourceStatus(req: Request, res: Response): Promise
 
     // Existing scheduled trips must not prevent a manager from restoring a resource.
     // Deactivation remains protected when it would strand scheduled/published trips.
-    const isDeactivating = rows[0].status === 'ACTIVE' && status !== 'ACTIVE';
+    const shouldCheckDependencies = shouldCheckTripDependenciesForStatusChange(type, rows[0].status, status);
     // Route/corridor deactivation controls future passenger discovery. Existing
     // scheduled trips and their booking history remain untouched; the public
     // trip listing already excludes inactive routes and corridors.
     // Keep dependency protection for fleet resources and boarding stops.
-    if (isDeactivating && type !== 'route' && type !== 'corridor') {
+    if (shouldCheckDependencies) {
       const [trips]: any = await connection.query(c.activeTripSql, [id]);
       if (trips.length) {
         await connection.rollback();
